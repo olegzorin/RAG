@@ -31,6 +31,9 @@ def get_property(key: str) -> str:
     return properties.get(key, PropertyTuple(data=None, meta=None)).data
 
 
+print('password = ' + get_property('ppc.ragagent.neo4j.password') + ', username = ' + get_property('ppc.ragagent.neo4j.username'))
+
+
 def get_int_property(key: str, default_value: int) -> int:
     return int(properties.get(key, PropertyTuple(data=default_value, meta=None)).data)
 
@@ -51,7 +54,7 @@ def _get_vectorstore(index_name, node_label):
         username=get_property('ppc.ragagent.neo4j.username'),
         index_name=(index_name or 'vector'),
         node_label=(node_label or 'Chunk'),
-        embedding=embedding_model
+        embedding=embedding_model,
     )
 
     dimension = vectorstore.retrieve_existing_index()
