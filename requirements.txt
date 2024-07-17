@@ -1,0 +1,10 @@
+langchain==0.1.6 
+pypdf2
+langchain-community
+sentence-transformers
+tiktoken
+llama-cpp-python
+faiss-cpu
+neo4j
+jproperties
+pydantic
