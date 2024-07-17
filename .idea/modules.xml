@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/RAG-R.iml" filepath="$PROJECT_DIR$/.idea/RAG-R.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/PPC-RAG.iml" filepath="$PROJECT_DIR$/.idea/PPC-RAG.iml" />
     </modules>
   </component>
 </project>
