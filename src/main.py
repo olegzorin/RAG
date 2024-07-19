@@ -2,39 +2,26 @@ import sys
 
 from pydantic import TypeAdapter, ValidationError
 
-from core import load_documents, answer_questions
+from core import load_documents_and_answer_questions
 from model import ActionResponse, ActionRequest
 
 
-def print_response(resp: ActionResponse):
-    print(TypeAdapter(ActionResponse).dump_json(resp).decode('utf8'))
-
-
-def print_error_message(error_message: str):
-    response = ActionResponse()
-    response.errorMessage = error_message
-    print_response(response)
-
-
 def main():
+    response = ActionResponse()
+
     if len(sys.argv) < 2:
-        print_error_message('No action data')
-        return
+        response.errorMessage = 'No input'
+    else:
+        try:
+            request = TypeAdapter(ActionRequest).validate_json(sys.argv[1])
+            response.answers = load_documents_and_answer_questions(request.documents, request.questions)
+            response.success = True
+        except ValidationError as ve:
+            response.errorMessage = f'Wrong action input, {str(ve)}'
+        except Exception as ex:
+            response.errorMessage = f'Unexpected exception, {ex=}, {type(ex)=}'
 
-    try:
-        action_request = TypeAdapter(ActionRequest).validate_json(sys.argv[1])
-
-        if action_request.documents is not None:
-            print_response(load_documents(action_request.documents, 'vector', 'Chunk'))
-        elif action_request.questions is not None:
-            print_response(answer_questions(action_request.questions, 'vector', 'Chunk'))
-        else:
-            print_error_message('Empty action request')
-
-    except ValidationError as ve:
-        print_error_message(f'Wrong action input, str{ve}')
-    except Exception as ex:
-        print_error_message(f'Unexpected exception, {ex=}, {type(ex)=}')
+    print(TypeAdapter(ActionResponse).dump_json(response).decode('utf8'))
 
 
 if __name__ == "__main__":

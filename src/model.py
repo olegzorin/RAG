@@ -4,26 +4,19 @@ from typing import Optional, List
 from pydantic import BaseModel
 
 
-class RagDocument(BaseModel):
+class RagDocumentRequest(BaseModel):
     url: str
     documentId: int
     contentType: Optional[str] = "application/pdf"
 
 
-class RagDocumentResponse(BaseModel):
-    documentId: int = 0
-    status: int = 0
-    errorMessage: str = None
-
-
 class ActionRequest(BaseModel):
-    questions: Optional[List[str]] = None
-    documents: Optional[List[RagDocument]] = None
+    questions: List[str]
+    documents: List[RagDocumentRequest]
     logLevel: Optional[int] = logging.WARNING
 
 
 class ActionResponse(BaseModel):
     success: bool = False
     answers: List[str] = None
-    documents: List[RagDocumentResponse] = None
     errorMessage: str = None
