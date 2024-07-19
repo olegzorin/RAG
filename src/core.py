@@ -9,14 +9,15 @@ from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from jproperties import Properties, PropertyTuple
 from langchain.chains import RetrievalQA
-from langchain.text_splitter import RecursiveCharacterTextSplitter, TextSplitter
 from langchain_community.chat_models import ChatOllama
 from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain_community.utilities import Requests
 from langchain_community.vectorstores.neo4j_vector import Neo4jVector
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+from langchain_experimental.text_splitter import SemanticChunker
 
-from model import RagDocument, RagDocumentResponse, ActionResponse
+from model import RagDocumentRequest
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
@@ -31,9 +32,6 @@ def get_property(key: str) -> str:
     return properties.get(key, PropertyTuple(data=None, meta=None)).data
 
 
-print('password = ' + get_property('ppc.ragagent.neo4j.password') + ', username = ' + get_property('ppc.ragagent.neo4j.username'))
-
-
 def get_int_property(key: str, default_value: int) -> int:
     return int(properties.get(key, PropertyTuple(data=default_value, meta=None)).data)
 
@@ -42,19 +40,13 @@ def get_float_property(key: str, default_value: float) -> float:
     return float(properties.get(key, PropertyTuple(data=default_value, meta=None)).data)
 
 
-def _get_vectorstore(index_name, node_label):
-    embedding_model = SentenceTransformerEmbeddings(
-        model_name=get_property('ppc.ragagent.embeddings.modelName'),
-        cache_folder=get_property('ppc.ragagent.embeddings.cacheDir')
-    )
-
+def get_vectorstore(embeddings_model: Embeddings, pre_delete: bool) -> Neo4jVector:
     vectorstore = Neo4jVector(
         url=get_property('ppc.ragagent.neo4j.url'),
         password=get_property('ppc.ragagent.neo4j.password'),
         username=get_property('ppc.ragagent.neo4j.username'),
-        index_name=(index_name or 'vector'),
-        node_label=(node_label or 'Chunk'),
-        embedding=embedding_model,
+        embedding=embeddings_model,
+        pre_delete_collection=pre_delete
     )
 
     dimension = vectorstore.retrieve_existing_index()
@@ -65,12 +57,7 @@ def _get_vectorstore(index_name, node_label):
     return vectorstore
 
 
-def load_document(rag_document: RagDocument, text_splitter: TextSplitter, vectorstore: Neo4jVector) -> RagDocumentResponse:
-    logger.info(f'Load document_id={rag_document.documentId}')
-
-    document_response = RagDocumentResponse()
-    document_response.documentId = rag_document.documentId
-
+def load_document(rag_document: RagDocumentRequest, text_splitter: SemanticChunker, vectorstore: Neo4jVector):
     try:
         data = Requests().get(rag_document.url).content
         pdf_reader = PdfReader(io.BytesIO(data))
@@ -83,37 +70,36 @@ def load_document(rag_document: RagDocument, text_splitter: TextSplitter, vector
         entries: [Document] = []
         for index, chunk in enumerate(chunks):
             entry = Document(chunk)
-            entry.metadata = {'document_id': rag_document.documentId, 'chunk_no': str(index)}
+            entry.metadata = {'document_id': str(rag_document.documentId), 'chunk_no': str(index)}
             entries.append(entry)
 
         vectorstore.add_documents(entries)
-        document_response.status = 1
 
     except PdfReadError as e:
-        document_response.errorMessage = f'Error reading document_id={rag_document.documentId}: {str(e)}'
-
-    return document_response
+        raise Exception(f'Error reading document_id={rag_document.documentId}: {str(e)}')
 
 
-def load_documents(rag_documents: List[RagDocument], index_name, node_label) -> ActionResponse:
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=get_int_property('ppc.ragagent.chunkSize', 1000),
-        chunk_overlap=get_int_property('ppc.ragagent.chunkOverlap', 200),
-        length_function=len
+def load_documents_and_answer_questions(documents: List[RagDocumentRequest], questions: List[str]) -> [str]:
+    if documents is None or not documents:
+        raise Exception('No documents to load')
+    if questions is None or not questions:
+        raise Exception('No questions to answer')
+
+    embeddings_model = SentenceTransformerEmbeddings(
+        model_name=get_property('ppc.ragagent.embeddings.modelName'),
+        cache_folder=get_property('ppc.ragagent.embeddings.cacheDir')
     )
 
-    vectorstore = _get_vectorstore(index_name, node_label)
+    text_chunker = SemanticChunker(
+        embeddings=embeddings_model
+    )
 
-    response = ActionResponse()
-    response.documents = [load_document(rag_document, text_splitter, vectorstore) for rag_document in rag_documents]
-    response.success = True
-    return response
+    vectorstore = get_vectorstore(
+        embeddings_model=embeddings_model,
+        pre_delete=True)
 
-
-def answer_questions(questions: List[str], index_name, node_label) -> ActionResponse:
-    logger.info("Get question-answering")
-
-    vectorstore = _get_vectorstore(index_name, node_label)
+    for doc in documents:
+        load_document(doc, text_chunker, vectorstore)
 
     llm = ChatOllama(
         base_url=get_property('ppc.ragagent.ollama.url'),
@@ -139,7 +125,4 @@ def answer_questions(questions: List[str], index_name, node_label) -> ActionResp
         retriever=vectorstore.as_retriever()
     )
 
-    response = ActionResponse()
-    response.answers = [qa.run(question) for question in questions]
-    response.success = True
-    return response
+    return [qa.invoke({'query': question})['result'] for question in questions]
