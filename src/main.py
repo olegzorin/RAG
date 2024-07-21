@@ -1,3 +1,4 @@
+import logging
 import sys
 
 from pydantic import TypeAdapter, ValidationError
@@ -6,14 +7,14 @@ from core import load_documents_and_answer_questions
 from model import ActionResponse, ActionRequest
 
 
-def main():
+def run(data: str):
     response = ActionResponse()
 
-    if len(sys.argv) < 2:
+    if data is None:
         response.errorMessage = 'No input'
     else:
         try:
-            request = TypeAdapter(ActionRequest).validate_json(sys.argv[1])
+            request = TypeAdapter(ActionRequest).validate_json(data)
             response.answers = load_documents_and_answer_questions(request.documents, request.questions)
             response.success = True
         except ValidationError as ve:
@@ -25,4 +26,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    inp = sys.argv[1] if 1 < len(sys.argv) else None
+    run(inp)

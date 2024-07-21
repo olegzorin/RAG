@@ -2,6 +2,7 @@ import io
 import logging
 import os
 import sys
+import warnings
 from pathlib import Path
 from typing import List
 
@@ -12,15 +13,12 @@ from langchain.chains import RetrievalQA
 from langchain_community.chat_models import ChatOllama
 from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain_community.utilities import Requests
-from langchain_community.vectorstores.neo4j_vector import Neo4jVector
+from langchain_community.vectorstores import Neo4jVector
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_experimental.text_splitter import SemanticChunker
 
 from model import RagDocumentRequest
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
 properties = Properties()
 props_path = Path(os.environ['PPC_HOME'], 'config', 'properties', 'ragagent.properties')
@@ -40,6 +38,17 @@ def get_float_property(key: str, default_value: float) -> float:
     return float(properties.get(key, PropertyTuple(data=default_value, meta=None)).data)
 
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    stream=sys.stderr,
+    level=get_int_property('ppc.ragagent.logLevel', logging.WARN)
+)
+warnings.filterwarnings(
+    action="ignore",
+    category=DeprecationWarning
+)
+
+
 def get_vectorstore(embeddings_model: Embeddings, pre_delete: bool) -> Neo4jVector:
     vectorstore = Neo4jVector(
         url=get_property('ppc.ragagent.neo4j.url'),
@@ -50,7 +59,7 @@ def get_vectorstore(embeddings_model: Embeddings, pre_delete: bool) -> Neo4jVect
     )
 
     dimension = vectorstore.retrieve_existing_index()
-    if dimension is None:
+    if dimension is None or dimension[0] is None:
         logger.info(f'Create index name={vectorstore.index_name}')
         vectorstore.create_new_index()
 

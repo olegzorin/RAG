@@ -1,3 +1,7 @@
+langchain==0.2.9
+langchain-huggingface==0.0.3
+langchain-community==0.2.7
+langchain-experimental==0.0.62
 pypdf2
 sentence-transformers
 tiktoken
@@ -6,6 +10,3 @@ faiss-cpu
 neo4j
 jproperties
 pydantic
-langchain==0.2.9
-langchain-community
-langchain-experimental==0.0.62

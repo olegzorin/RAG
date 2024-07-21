@@ -13,7 +13,6 @@ class RagDocumentRequest(BaseModel):
 class ActionRequest(BaseModel):
     questions: List[str]
     documents: List[RagDocumentRequest]
-    logLevel: Optional[int] = logging.WARNING
 
 
 class ActionResponse(BaseModel):
