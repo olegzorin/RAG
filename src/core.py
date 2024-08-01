@@ -14,11 +14,10 @@ from langchain_community.chat_models import ChatOllama
 from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain_community.utilities import Requests
 from langchain_community.vectorstores import Neo4jVector
-from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_experimental.text_splitter import SemanticChunker
 
-from model import RagDocumentRequest
+from model import ActionDocument
 
 properties = Properties()
 props_path = Path(os.environ['PPC_HOME'], 'config', 'properties', 'ragagent.properties')
@@ -66,49 +65,39 @@ def get_vectorstore(embeddings_model: Embeddings, pre_delete: bool) -> Neo4jVect
     return vectorstore
 
 
-def load_document(rag_document: RagDocumentRequest, text_splitter: SemanticChunker, vectorstore: Neo4jVector):
-    try:
-        data = Requests().get(rag_document.url).content
-        pdf_reader = PdfReader(io.BytesIO(data))
-
-        content = ""
-        for page in pdf_reader.pages:
-            content += page.extract_text()
-        chunks = text_splitter.split_text(text=content)
-
-        entries: [Document] = []
-        for index, chunk in enumerate(chunks):
-            entry = Document(chunk)
-            entry.metadata = {'document_id': str(rag_document.documentId), 'chunk_no': str(index)}
-            entries.append(entry)
-
-        vectorstore.add_documents(entries)
-
-    except PdfReadError as e:
-        raise Exception(f'Error reading document_id={rag_document.documentId}: {str(e)}')
+def read_documents(docs: List[ActionDocument]) -> str:
+    contents = []
+    for doc in docs:
+        try:
+            data = Requests().get(doc.url).content
+            pdf_reader = PdfReader(io.BytesIO(data))
+            contents.append(" {0}".format("\n\n".join(page.extract_text() for page in pdf_reader.pages)))
+        except PdfReadError as e:
+            raise PdfReadError(f"Error reading document_id={doc.documentId}: {str(e)}")
+    return "\n\n".join(contents)
 
 
-def load_documents_and_answer_questions(documents: List[RagDocumentRequest], questions: List[str]) -> [str]:
+def load_documents_and_answer_questions(documents: List[ActionDocument], questions: List[str]) -> List[str]:
     if documents is None or not documents:
         raise Exception('No documents to load')
     if questions is None or not questions:
         raise Exception('No questions to answer')
+
+    content: str = read_documents(documents)
 
     embeddings_model = SentenceTransformerEmbeddings(
         model_name=get_property('ppc.ragagent.embeddings.modelName'),
         cache_folder=get_property('ppc.ragagent.embeddings.cacheDir')
     )
 
-    text_chunker = SemanticChunker(
-        embeddings=embeddings_model
-    )
-
     vectorstore = get_vectorstore(
         embeddings_model=embeddings_model,
         pre_delete=True)
 
-    for doc in documents:
-        load_document(doc, text_chunker, vectorstore)
+    text_chunker = SemanticChunker(
+        embeddings=embeddings_model
+    )
+    vectorstore.add_texts(text_chunker.split_text(text=content))
 
     llm = ChatOllama(
         base_url=get_property('ppc.ragagent.ollama.url'),
@@ -135,3 +124,8 @@ def load_documents_and_answer_questions(documents: List[RagDocumentRequest], que
     )
 
     return [qa.invoke({'query': question})['result'] for question in questions]
+
+
+# pdf = pdfplumber.open(Path('/Users/oleg/Downloads/99.pdf'))
+pdf = PdfReader(open(Path('/Users/oleg/Downloads/99.pdf'), 'rb'))
+print(" ".join(page.extract_text() for page in pdf.pages))

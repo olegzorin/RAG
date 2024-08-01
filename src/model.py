@@ -1,18 +1,16 @@
-import logging
-from typing import Optional, List
+from typing import List
 
 from pydantic import BaseModel
 
 
-class RagDocumentRequest(BaseModel):
+class ActionDocument(BaseModel):
     url: str
     documentId: int
-    contentType: Optional[str] = "application/pdf"
 
 
 class ActionRequest(BaseModel):
     questions: List[str]
-    documents: List[RagDocumentRequest]
+    documents: List[ActionDocument]
 
 
 class ActionResponse(BaseModel):
