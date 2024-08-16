@@ -4,7 +4,7 @@ import base64
 from PyPDF2.errors import PdfReadError
 from pydantic import TypeAdapter, ValidationError
 
-from core import load_documents_and_answer_questions
+from core import process_request
 from model import ActionResponse, ActionRequest
 
 
@@ -17,7 +17,7 @@ def run(data: str):
         try:
             decoded = base64.b64decode(data)
             request = TypeAdapter(ActionRequest).validate_json(decoded)
-            response.answers = load_documents_and_answer_questions(request.documents, request.questions)
+            process_request(request, response)
             response.success = True
         except ValidationError as ve:
             response.errorMessage = f'Wrong action input, {str(ve)}'

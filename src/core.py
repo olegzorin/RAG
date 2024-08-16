@@ -1,60 +1,54 @@
 import io
-import logging
-import os
-import sys
+import json
 import warnings
-from pathlib import Path
-from typing import List
+from typing import List, Any
 
+import camelot
+import torch
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
-from jproperties import Properties, PropertyTuple
-from langchain.chains import RetrievalQA
+from camelot.core import Table
 from langchain_community.chat_models import ChatOllama
-from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain_community.utilities import Requests
 from langchain_community.vectorstores import Neo4jVector
 from langchain_core.embeddings import Embeddings
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
 from langchain_experimental.text_splitter import SemanticChunker
+from langchain_huggingface import HuggingFaceEmbeddings
+from model import ActionRequest, ActionResponse
+from pydantic import Json
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from utils import get_int_property, get_property, get_float_property, clean_text, get_logger, get_non_empty_or_none
 
-from model import ActionDocument
+warnings.filterwarnings(action="ignore", category=DeprecationWarning)
+warnings.filterwarnings(action="ignore", category=FutureWarning)
+warnings.filterwarnings(action="error", category=UserWarning)
 
-properties = Properties()
-props_path = Path(os.environ['PPC_HOME'], 'config', 'properties', 'ragagent.properties')
-with open(props_path, 'rb') as props_file:
-    properties.load(props_file)
-
-
-def get_property(key: str) -> str:
-    return properties.get(key, PropertyTuple(data=None, meta=None)).data
-
-
-def get_int_property(key: str, default_value: int) -> int:
-    return int(properties.get(key, PropertyTuple(data=default_value, meta=None)).data)
+logger = get_logger(__name__)
 
 
-def get_float_property(key: str, default_value: float) -> float:
-    return float(properties.get(key, PropertyTuple(data=default_value, meta=None)).data)
+class CloseableVectorStore(Neo4jVector):
+    def close(self):
+        self._driver.close()
 
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    stream=sys.stderr,
-    level=get_int_property('ppc.ragagent.logLevel', logging.WARN)
-)
-warnings.filterwarnings(
-    action="ignore",
-    category=DeprecationWarning
-)
+def get_embeddings_model() -> Embeddings:
+    return HuggingFaceEmbeddings(
+        model_name=get_property('ppc.ragagent.embeddings.modelName'),
+        cache_folder=get_property('ppc.ragagent.embeddings.cacheDir')
+    )
 
 
-def get_vectorstore(embeddings_model: Embeddings, pre_delete: bool) -> Neo4jVector:
-    vectorstore = Neo4jVector(
+def get_vectorstore(embeddings_model: Embeddings) -> CloseableVectorStore:
+    vectorstore = CloseableVectorStore(
         url=get_property('ppc.ragagent.neo4j.url'),
         password=get_property('ppc.ragagent.neo4j.password'),
         username=get_property('ppc.ragagent.neo4j.username'),
         embedding=embeddings_model,
-        pre_delete_collection=pre_delete
+        logger=logger,
+        pre_delete_collection=True
     )
 
     dimension = vectorstore.retrieve_existing_index()
@@ -65,41 +59,44 @@ def get_vectorstore(embeddings_model: Embeddings, pre_delete: bool) -> Neo4jVect
     return vectorstore
 
 
-def read_documents(docs: List[ActionDocument]) -> str:
-    contents = []
-    for doc in docs:
-        try:
-            data = Requests().get(doc.url).content
-            pdf_reader = PdfReader(io.BytesIO(data))
-            contents.append(" {0}".format("\n\n".join(page.extract_text() for page in pdf_reader.pages)))
-        except PdfReadError as e:
-            raise PdfReadError(f"Error reading document_id={doc.documentId}: {str(e)}")
-    return "\n\n".join(contents)
+def get_table_rows(table: Table) -> list[str] | None:
+    df_table = table.df.dropna(how="all").loc[:, ~table.df.columns.isin(['', ' '])]
+    df_table = df_table.apply(lambda x: x.str.replace("\n", " "))
+    df_table = df_table.rename(columns=df_table.iloc[0]).drop(df_table.index[0]).reset_index(drop=True)
 
+    if df_table.shape[0] <= 3 or df_table.eq("").all(axis=None):
+        return None
 
-def load_documents_and_answer_questions(documents: List[ActionDocument], questions: List[str]) -> List[str]:
-    if documents is None or not documents:
-        raise Exception('No documents to load')
-    if questions is None or not questions:
-        raise Exception('No questions to answer')
-
-    content: str = read_documents(documents)
-
-    embeddings_model = SentenceTransformerEmbeddings(
-        model_name=get_property('ppc.ragagent.embeddings.modelName'),
-        cache_folder=get_property('ppc.ragagent.embeddings.cacheDir')
+    df_table["summary"] = df_table.apply(
+        lambda x: " ".join([f"{col}: {val}, " for col, val in x.items()]),
+        axis=1
     )
+    return [row["summary"] for ind, row in df_table.iterrows()]
 
-    vectorstore = get_vectorstore(
-        embeddings_model=embeddings_model,
-        pre_delete=True)
 
-    text_chunker = SemanticChunker(
-        embeddings=embeddings_model
-    )
-    vectorstore.add_texts(text_chunker.split_text(text=content))
+def load_document(document_id: int, url: str, text_chunker) -> list[str]:
+    chunks: list[str] = []
+    try:
+        data = Requests().get(url).content
+        pdf_reader = PdfReader(io.BytesIO(data))
+        for page_no, page in enumerate(pdf_reader.pages, 1):
+            chunks.extend(text_chunker.split_text(text=page.extract_text()))
+            try:
+                table_list = camelot.read_pdf(url, pages=str(page_no), suppress_stdout=False, backend='ghostscript')
+                for table in table_list:
+                    rows = get_table_rows(table)
+                    if rows is not None and len(rows) > 0:
+                        chunks.extend(rows)
+            except UserWarning as e:
+                logger.warning(f"Problem reading tables in document_id={document_id}, page_no={page_no}: {str(e)}")
 
-    llm = ChatOllama(
+            return list(map(clean_text, chunks))
+    except Exception as e:
+        raise PdfReadError(f"Error reading content of documentId={document_id}: {str(e)}")
+
+
+def get_llm():
+    return ChatOllama(
         base_url=get_property('ppc.ragagent.ollama.url'),
         model=get_property('ppc.ragagent.ollama.model'),
         streaming=True,
@@ -117,15 +114,83 @@ def load_documents_and_answer_questions(documents: List[ActionDocument], questio
         # Maximum number of tokens to predict when generating text. (Default: 128, -1 = infinite generation, -2 = fill context)
     )
 
-    qa = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=vectorstore.as_retriever()
-    )
 
-    return [qa.invoke({'query': question})['result'] for question in questions]
+def generate_outputs(answers: List[str], template: Json[Any], examples: Json[Any]) -> list[str]:
+    model = AutoModelForCausalLM.from_pretrained("numind/NuExtract-tiny", trust_remote_code=True, torch_dtype=torch.bfloat16)
+    model.eval()
+
+    tokenizer = AutoTokenizer.from_pretrained("numind/NuExtract-tiny", trust_remote_code=True)
+
+    input_llm: list[str] = ["<|input|>"]
+    if template is not None:
+        input_llm.extend(["### Template:", json.dumps(template, indent=4)])
+
+    if examples is not None:
+        input_llm.extend(["### Examples:", json.dumps(examples, indent=4)])
+
+    input_llm.extend(["### Text:", "", "<|output|>"])
+
+    outputs = []
+    for answer in answers:
+        input_llm[-2] = answer
+        input_ids = tokenizer("\n".join(input_llm), return_tensors="pt", truncation=True, max_length=4000)
+        output = tokenizer.decode(model.generate(**input_ids)[0], skip_special_tokens=True)
+        outputs.append(json.loads(output.split("<|output|>")[1].split("<|end-output|>")[0]))
+
+    return outputs
 
 
-# pdf = pdfplumber.open(Path('/Users/oleg/Downloads/99.pdf'))
-pdf = PdfReader(open(Path('/Users/oleg/Downloads/99.pdf'), 'rb'))
-print(" ".join(page.extract_text() for page in pdf.pages))
+def process_request(req: ActionRequest, resp: ActionResponse):
+    if req.documents is None or not req.documents:
+        raise Exception('No documents to load')
+    if req.questions is None or not req.questions:
+        raise Exception('No questions to answer')
+
+    embeddings_model: Embeddings = get_embeddings_model()
+    chunks = load_document(req.document_id, req.url, SemanticChunker(embeddings=embeddings_model))
+
+    llm = get_llm()
+
+    vectorstore = get_vectorstore(embeddings_model)
+    try:
+        vectorstore.add_texts(chunks)
+
+        system_message = req.params.get(
+            'chat_prompt_system_message',
+            "You are an assistant for question-answering tasks. Do not make up information."
+        )
+        rag_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", system_message),
+                ("user", """<context>
+                    {context}
+                    </context>
+
+                    Answer the following question: 
+
+                    {question}"""),
+            ]
+        )
+
+        qa_chain = (
+                {"context": vectorstore.as_retriever(), "question": RunnablePassthrough()}
+                | rag_prompt
+                | llm
+                | StrOutputParser()
+        )
+
+        answers = [qa_chain.invoke(question).strip() for question in req.questions]
+
+        template = get_non_empty_or_none(req.template)
+        examples = get_non_empty_or_none(req.examples)
+
+        if template is not None or examples is not None:
+            try:
+                resp.outputs = generate_outputs(answers, req.template, req.examples)
+            except Exception as e:
+                raise Exception(f"Error generating outputs: {str(e)}")
+
+        resp.answers = answers
+
+    finally:
+        vectorstore.close()
