@@ -2,10 +2,10 @@
 
 export PPC_HOME=${PPC_HOME:-/opt/greenxserver}
 
-cd "${PPC_HOME}"/ragagent/python || exit 1
-
 source .venv/bin/activate
 
-python main.py "$1"
+outfile=$(mktemp)
+python src/main.py "$outfile" "$1" 1>&2
+cat "$outfile"
 
 deactivate

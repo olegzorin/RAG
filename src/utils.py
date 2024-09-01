@@ -4,42 +4,34 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any
 
 from jproperties import Properties, PropertyTuple
-from pydantic import Json
+
+home_dir = os.getenv('PPC_HOME', '/opt/greenxserver')
 
 properties = Properties()
-props_path = Path(os.environ['PPC_HOME'], 'config', 'properties', 'ragagent.properties')
-
+props_path = Path(home_dir, 'config', 'properties', 'ragagent.properties')
 with open(props_path, 'rb') as props_file:
     properties.load(props_file)
 
+def get_property(key: str, default: str = None) -> str:
+    return properties.get(f'ppc.ragagent.{key}', PropertyTuple(data=default, meta=None)).data
 
-def get_property(key: str) -> str:
-    return properties.get(key, PropertyTuple(data=None, meta=None)).data
-
-
-def get_int_property(key: str, default_value: int) -> int:
-    return int(properties.get(key, PropertyTuple(data=default_value, meta=None)).data)
-
-
-def get_float_property(key: str, default_value: float) -> float:
-    return float(properties.get(key, PropertyTuple(data=default_value, meta=None)).data)
+def resolve_path(property_key: str, default_path: str) -> Path:
+    return Path(home_dir, 'ragagent', get_property(property_key, default_path))
 
 
 def get_logger(name):
+    log_level = int(properties.get('ppc.ragagent.logLevel', PropertyTuple(data=logging.WARN, meta=None)).data)
     logging.basicConfig(
         stream=sys.stderr,
-        level=get_int_property('ppc.ragagent.logLevel', logging.WARN)
+        level=log_level
     )
     return logging.getLogger(name)
-
 
 def clean_text(text: str):
     return re.sub('[\0\\s]+', ' ', text).strip()
 
-
-def get_non_empty_or_none(json_obj: Json[Any]) -> Json[Any]:
+def get_non_empty_or_none(json_obj):
     is_empty = json_obj is None or not json_obj or not re.search('[a-zA-Z\\d]', json.dumps(json_obj))
     return None if is_empty else json_obj

@@ -13,3 +13,5 @@ camelot-py
 opencv-python
 ghostscript
 transformers
+pdf2image
+pytesseract

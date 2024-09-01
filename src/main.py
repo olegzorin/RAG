@@ -1,14 +1,29 @@
-import sys
 import base64
+import sys
+from typing import List, Optional, Dict, Any
 
-from PyPDF2.errors import PdfReadError
-from pydantic import TypeAdapter, ValidationError
-
-from core import process_request
-from model import ActionResponse, ActionRequest
+from core import Ragger
+from pydantic import TypeAdapter, ValidationError, BaseModel
+from utils import get_non_empty_or_none
 
 
-def run(data: str):
+class ActionRequest(BaseModel):
+    documentId: int
+    url: str
+    questions: List[str]
+    template: Optional[Any] = None
+    examples: Optional[List[Any]] = None
+    params: Optional[Dict] = {}
+
+
+class ActionResponse(BaseModel):
+    success: bool = False
+    answers: List[str] = None
+    outputs: List[Any] = None
+    errorMessage: str = None
+
+
+def run(data: str, outpath: Optional[str] = None):
     response = ActionResponse()
 
     if not data:
@@ -17,18 +32,33 @@ def run(data: str):
         try:
             decoded = base64.b64decode(data)
             request = TypeAdapter(ActionRequest).validate_json(decoded)
-            process_request(request, response)
+
+            ragger = Ragger(request.params)
+
+            answers = ragger.get_answers(request.documentId, request.url, request.questions)
+
+            template = get_non_empty_or_none(request.template)
+            examples = get_non_empty_or_none(request.examples)
+            if template is not None or examples is not None:
+                response.outputs = ragger.generate_outputs(answers, template, examples)
+
+            response.answers = answers
             response.success = True
+
         except ValidationError as ve:
             response.errorMessage = f'Wrong action input, {str(ve)}'
-        except PdfReadError as re:
-            response.errorMessage = str(re)
+        except RuntimeError as ex:
+            response.errorMessage = str(ex)
         except Exception as ex:
             response.errorMessage = f'Unexpected exception: {str(ex)}'
 
-    print(TypeAdapter(ActionResponse).dump_json(response).decode('utf8'))
+        result = TypeAdapter(ActionResponse).dump_json(response, exclude_none=True)
+
+        outfile = open(outpath, 'w') if outpath is not None else sys.stdout
+        print(result, file=outfile)
 
 
 if __name__ == "__main__":
-    inp = sys.argv[1] if 1 < len(sys.argv) else None
-    run(inp)
+    path = sys.argv[1]
+    inp = sys.argv[2] if 2 < len(sys.argv) else None
+    run(inp, path)
