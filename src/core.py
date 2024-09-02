@@ -1,6 +1,6 @@
 import json
+import logging
 import os
-import warnings
 from typing import List, Any, Dict
 
 import camelot
@@ -11,21 +11,19 @@ from PIL.Image import Image
 from camelot.core import Table
 from camelot.utils import is_url, download_url
 from langchain_community.chat_models import ChatOllama
-from langchain_community.vectorstores import Neo4jVector
 from langchain_core.embeddings import Embeddings
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
+from langchain_core.vectorstores import VectorStore
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_huggingface import HuggingFaceEmbeddings
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from utils import get_property, clean_text, get_logger, resolve_path
 
-warnings.filterwarnings(action="ignore", category=DeprecationWarning)
-warnings.filterwarnings(action="ignore", category=FutureWarning)
-warnings.filterwarnings(action="error", category=UserWarning)
+from db import ChromaDB
+from utils import get_property, clean_text, resolve_path
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
@@ -75,48 +73,12 @@ def _read_document(document_id: int, source: str, text_chunker) -> list[str]:
         raise RuntimeError(f"Error reading content of documentId={document_id}: {str(e)}")
 
 
-class CloseableVectorStore(Neo4jVector):
-
-    def __init__(
-            self,
-            embeddings_model: Embeddings):
-
-        super().__init__(
-            url=get_property('neo4j.url'),
-            password=get_property('neo4j.password'),
-            username=get_property('neo4j.username'),
-            embedding=embeddings_model,
-            logger=logger
-        )
-
-    def reset(self):
-        """
-        Delete existing data and create a new index
-        """
-        from neo4j.exceptions import DatabaseError
-
-        self.query(
-            f"MATCH (n:`{self.node_label}`) "
-            "CALL { WITH n DETACH DELETE n } "
-            "IN TRANSACTIONS OF 10000 ROWS;"
-        )
-        try:
-            self.query(f"DROP INDEX {self.index_name}")
-        except DatabaseError:  # Index didn't exist yet
-            pass
-
-        self.create_new_index()
-
-
-    def close(self):
-        self._driver.close()
-
 
 class Ragger:
     params: Dict
     llm: ChatOllama
     embeddingsModel: Embeddings
-    vectorstore: CloseableVectorStore
+    vectorstore: VectorStore
 
     def __init__(self, params: Dict):
         self.params = params
@@ -126,7 +88,8 @@ class Ragger:
             cache_folder=resolve_path('embeddingsModel.cacheDir', 'caches/embeddings').as_posix()
         )
 
-        self.vectorstore = CloseableVectorStore(self.embeddings_model)
+        # self.vectorstore = CloseableVectorStore(self.embeddings_model)
+        self.vectorstore = ChromaDB(embeddings_model=self.embeddings_model)
 
         self.llm = ChatOllama(
             base_url=get_property('ollama.url'),

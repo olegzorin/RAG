@@ -1,10 +1,18 @@
 import base64
+import logging
 import sys
+import warnings
 from typing import List, Optional, Dict, Any
 
 from core import Ragger
 from pydantic import TypeAdapter, ValidationError, BaseModel
-from utils import get_non_empty_or_none
+from utils import get_non_empty_or_none, get_log_level
+
+logging.basicConfig(stream=sys.stderr, level=get_log_level())
+
+warnings.filterwarnings(action="ignore", category=DeprecationWarning)
+warnings.filterwarnings(action="ignore", category=FutureWarning)
+warnings.filterwarnings(action="error", category=UserWarning)
 
 
 class ActionRequest(BaseModel):
@@ -54,8 +62,11 @@ def run(data: str, outpath: Optional[str] = None):
 
         result = TypeAdapter(ActionResponse).dump_json(response, exclude_none=True)
 
-        outfile = open(outpath, 'w') if outpath is not None else sys.stdout
-        print(result, file=outfile)
+        if outpath is not None:
+            with open(outpath, 'wb') as outfile:
+                outfile.write(result)
+        else:
+            print(result)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@ import json
 import logging
 import os
 import re
-import sys
 from pathlib import Path
 
 from jproperties import Properties, PropertyTuple
@@ -20,14 +19,8 @@ def get_property(key: str, default: str = None) -> str:
 def resolve_path(property_key: str, default_path: str) -> Path:
     return Path(home_dir, 'ragagent', get_property(property_key, default_path))
 
-
-def get_logger(name):
-    log_level = int(properties.get('ppc.ragagent.logLevel', PropertyTuple(data=logging.WARN, meta=None)).data)
-    logging.basicConfig(
-        stream=sys.stderr,
-        level=log_level
-    )
-    return logging.getLogger(name)
+def get_log_level() -> int:
+    return int(properties.get(f'ppc.ragagent.logLevel', PropertyTuple(data=logging.WARN, meta=None)).data)
 
 def clean_text(text: str):
     return re.sub('[\0\\s]+', ' ', text).strip()
