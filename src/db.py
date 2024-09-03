@@ -1,14 +1,39 @@
 import logging
+from abc import ABC, abstractmethod
 
 import chromadb.config
 from langchain_community.vectorstores import Neo4jVector, Chroma
+
 from langchain_core.embeddings import Embeddings
+from langchain_core.vectorstores import VectorStore
 
-from utils import get_property
+from conf import get_property
 
 
-class Neo4jDB(Neo4jVector):
+class DB(VectorStore, ABC):
 
+    CHROMA: str = 'chroma'
+    NEO4J: str = 'neo4j'
+
+    @abstractmethod
+    def reset(self):
+        pass
+
+    @abstractmethod
+    def close(self):
+        pass
+
+    @classmethod
+    def get_instance(cls, name: str, embeddings_model: Embeddings):
+        if name == cls.CHROMA:
+            return ChromaDB(embeddings_model)
+        elif name == cls.NEO4J:
+            return Neo4jDB(embeddings_model)
+        else:
+            raise Exception("Wrong RagDB name")
+
+
+class Neo4jDB(Neo4jVector, DB):
     def __init__(
             self,
             embeddings_model: Embeddings
@@ -19,7 +44,7 @@ class Neo4jDB(Neo4jVector):
             password=get_property('neo4j.password'),
             username=get_property('neo4j.username'),
             embedding=embeddings_model,
-            logger=logging.getLogger(__name__)
+            logger=logging.getLogger('Neo4jDB')
         )
 
     def reset(self):
@@ -40,12 +65,12 @@ class Neo4jDB(Neo4jVector):
 
         self.create_new_index()
 
-
     def close(self):
         self._driver.close()
 
 
-class ChromaDB(Chroma):
+class ChromaDB(Chroma, DB):
+
     def __init__(
             self,
             embeddings_model: Embeddings
@@ -54,8 +79,7 @@ class ChromaDB(Chroma):
             embedding_function=embeddings_model,
             client_settings=chromadb.config.Settings(
                 anonymized_telemetry=False,
-                is_persistent=False,
-                persist_directory="./chroma"
+                is_persistent=False
             )
         )
 

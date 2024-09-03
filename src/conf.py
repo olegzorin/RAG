@@ -1,7 +1,5 @@
-import json
 import logging
 import os
-import re
 from pathlib import Path
 
 from jproperties import Properties, PropertyTuple
@@ -21,10 +19,3 @@ def resolve_path(property_key: str, default_path: str) -> Path:
 
 def get_log_level() -> int:
     return int(properties.get(f'ppc.ragagent.logLevel', PropertyTuple(data=logging.WARN, meta=None)).data)
-
-def clean_text(text: str):
-    return re.sub('[\0\\s]+', ' ', text).strip()
-
-def get_non_empty_or_none(json_obj):
-    is_empty = json_obj is None or not json_obj or not re.search('[a-zA-Z\\d]', json.dumps(json_obj))
-    return None if is_empty else json_obj

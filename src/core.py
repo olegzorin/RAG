@@ -1,98 +1,63 @@
 import json
 import logging
 import os
-from typing import List, Any, Dict
+import time
 
-import camelot
-import pdf2image
-import pytesseract
+import conf
+import reader
+
+from typing import List, Any, Dict, Optional
+
 import torch
-from PIL.Image import Image
-from camelot.core import Table
-from camelot.utils import is_url, download_url
 from langchain_community.chat_models import ChatOllama
+from langchain.retrievers import EnsembleRetriever
+
 from langchain_core.embeddings import Embeddings
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
-from langchain_core.vectorstores import VectorStore
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_huggingface import HuggingFaceEmbeddings
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from db import ChromaDB
-from utils import get_property, clean_text, resolve_path
+from db import DB
 
 logger = logging.getLogger(__name__)
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 
-def _get_table_rows(table: Table) -> list[str] | None:
-    df_table = table.df.dropna(how="all").loc[:, ~table.df.columns.isin(['', ' '])]
-    df_table = df_table.apply(lambda x: x.str.replace("\n", " "))
-    df_table = df_table.rename(columns=df_table.iloc[0]).drop(df_table.index[0]).reset_index(drop=True)
-
-    if df_table.shape[0] <= 3 or df_table.eq("").all(axis=None):
-        return None
-
-    df_table["summary"] = df_table.apply(
-        lambda x: " ".join([f"{col}: {val}, " for col, val in x.items()]),
-        axis=1
-    )
-    return [row["summary"] for ind, row in df_table.iterrows()]
-
-
-def _read_document(document_id: int, source: str, text_chunker) -> list[str]:
-    chunks: list[str] = []
-    try:
-        if is_url(source):
-            source = download_url(source)
-
-        pages: list[Image] = pdf2image.convert_from_path(pdf_path=source, dpi=300)
-
-        for page_no, page in enumerate(pages, 1):
-            try:
-                text = pytesseract.image_to_string(page)
-                chunks.extend(text_chunker.split_text(text=text))
-            except UserWarning as w:
-                logger.warning(f"Problem reading text in document_id={document_id}, page_no={page_no}: {str(w)}")
-
-        for page_no in range(1, len(pages)):
-            try:
-                table_list = camelot.read_pdf(filepath=source, pages=str(page_no), suppress_stdout=False, backend='ghostscript')
-                for table in table_list:
-                    rows = _get_table_rows(table)
-                    if rows is not None and len(rows) > 0:
-                        chunks.extend(rows)
-            except UserWarning as w:
-                logger.warning(f"Problem reading tables in document_id={document_id}, page_no={page_no}: {str(w)}")
-
-        return list(map(lambda txt: clean_text(txt), chunks))
-    except Exception as e:
-        raise RuntimeError(f"Error reading content of documentId={document_id}: {str(e)}")
-
+class SearchType:
+    BASIC = "similarity"
+    BM25 = "bm25"
+    MMR = "mmr"
+    values = [BASIC, BM25, MMR]
 
 
 class Ragger:
+
     params: Dict
-    llm: ChatOllama
+    search_types: list[str]
     embeddingsModel: Embeddings
-    vectorstore: VectorStore
+    llm: ChatOllama
 
     def __init__(self, params: Dict):
         self.params = params
 
+        self.search_types = params.get("search_types", SearchType.BASIC).split(',')
+        for search_type in self.search_types:
+            if search_type not in SearchType.values:
+                raise TypeError(f"Invalid search type '{search_type}', valid types: {SearchType.values}")
+
         self.embeddings_model = HuggingFaceEmbeddings(
             model_name=params.get("embeggingsModel", 'all-MiniLM-L6-v2'),
-            cache_folder=resolve_path('embeddingsModel.cacheDir', 'caches/embeddings').as_posix()
+            cache_folder=conf.resolve_path('embeddingsModel.cacheDir', 'caches/embeddings').as_posix()
         )
 
-        # self.vectorstore = CloseableVectorStore(self.embeddings_model)
-        self.vectorstore = ChromaDB(embeddings_model=self.embeddings_model)
+        logger.info(f"loaded embeddings: {time.ctime()}")
 
         self.llm = ChatOllama(
-            base_url=get_property('ollama.url'),
+            base_url=conf.get_property('ollama.url'),
             streaming=True,
             model=params.get('ollama.model', 'llama2'),
             temperature=float(params.get('ollama.temperature', 0.0)),
@@ -108,14 +73,36 @@ class Ragger:
             num_predict=int(params.get('ollama.num_predict', -2))
             # Maximum number of tokens to predict when generating text. (Default: 128, -1 = infinite generation, -2 = fill context)
         )
+        logger.info(f"loaded LLM: {time.ctime()}")
 
 
     def get_answers(self, document_id: int, url: str, questions: List[str]) -> List[str]:
-        chunks = _read_document(document_id, url, SemanticChunker(embeddings=self.embeddings_model))
+        chunks = reader.read_pdf(document_id, url, SemanticChunker(embeddings=self.embeddings_model))
+
+        logger.info(f"read document: {time.ctime()}")
+
+        vectorstore: Optional[DB] = None
 
         try:
-            self.vectorstore.reset()
-            self.vectorstore.add_texts(chunks)
+
+            retrievers = []
+            for search_type in self.search_types:
+                if search_type == SearchType.BM25:
+                    from langchain_community.retrievers import BM25Retriever
+                    bm25_retriever = BM25Retriever.from_texts(chunks)
+                    bm25_retriever.k = 3
+                    retrievers.append(bm25_retriever)
+                else:
+                    if vectorstore is None:
+                        vectorstore = DB.get_instance(
+                            name=self.params.get("vectorstore", DB.NEO4J),
+                            embeddings_model=self.embeddings_model
+                        )
+                        vectorstore.add_texts(chunks)
+
+                    retrievers.append(vectorstore.as_retriever(search_type=search_type))
+
+            ensemble_retriever = EnsembleRetriever(retrievers=retrievers)
 
             system_message = self.params.get(
                 'chat_prompt_system_message',
@@ -135,7 +122,7 @@ class Ragger:
             )
 
             qa_chain = (
-                    {"context": self.vectorstore.as_retriever(), "question": RunnablePassthrough()}
+                    {"context": ensemble_retriever, "question": RunnablePassthrough()}
                     | rag_prompt
                     | self.llm
                     | StrOutputParser()
@@ -144,12 +131,13 @@ class Ragger:
             return [qa_chain.invoke(question).strip() for question in questions]
 
         finally:
-            self.vectorstore.close()
+            if vectorstore is not None:
+                vectorstore.close()
 
 
     def generate_outputs(self, texts: List[str], template: Any, examples: List[Any]) -> List[Any]:
         output_model = self.params.get("output.model", "numind/NuExtract-tiny")
-        output_model_cache_dir = resolve_path('outputsModel.cacheDir', 'caches/outputs')
+        output_model_cache_dir = conf.resolve_path('outputsModel.cacheDir', 'caches/outputs')
 
         try:
             model = AutoModelForCausalLM.from_pretrained(

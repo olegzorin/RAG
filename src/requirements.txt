@@ -1,7 +1,7 @@
-langchain==0.2.12
-langchain-community==0.2.11
-langchain-huggingface==0.0.3
-langchain-experimental==0.0.62
+langchain
+langchain-community==0.2.15
+langchain-huggingface
+langchain-experimental
 pypdf2
 pycryptodome
 sentence-transformers==3.0.1
@@ -16,3 +16,5 @@ transformers
 pdf2image
 pytesseract
 chromadb
+rank_bm25
+simsimd

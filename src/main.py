@@ -1,14 +1,16 @@
 import base64
+import json
 import logging
+import re
 import sys
 import warnings
+import conf
 from typing import List, Optional, Dict, Any
 
 from core import Ragger
 from pydantic import TypeAdapter, ValidationError, BaseModel
-from utils import get_non_empty_or_none, get_log_level
 
-logging.basicConfig(stream=sys.stderr, level=get_log_level())
+logging.basicConfig(stream=sys.stderr, level=conf.get_log_level())
 
 warnings.filterwarnings(action="ignore", category=DeprecationWarning)
 warnings.filterwarnings(action="ignore", category=FutureWarning)
@@ -45,8 +47,8 @@ def run(data: str, outpath: Optional[str] = None):
 
             answers = ragger.get_answers(request.documentId, request.url, request.questions)
 
-            template = get_non_empty_or_none(request.template)
-            examples = get_non_empty_or_none(request.examples)
+            template = _get_non_empty_or_none(request.template)
+            examples = _get_non_empty_or_none(request.examples)
             if template is not None or examples is not None:
                 response.outputs = ragger.generate_outputs(answers, template, examples)
 
@@ -67,6 +69,11 @@ def run(data: str, outpath: Optional[str] = None):
                 outfile.write(result)
         else:
             print(result)
+
+
+def _get_non_empty_or_none(json_obj):
+    is_empty = json_obj is None or not json_obj or not re.search('[a-zA-Z\\d]', json.dumps(json_obj))
+    return None if is_empty else json_obj
 
 
 if __name__ == "__main__":
