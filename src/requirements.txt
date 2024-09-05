@@ -17,4 +17,6 @@ pdf2image
 pytesseract
 chromadb
 rank_bm25
-simsimd
+pysqlite3-binary
+pymupdf
+tiktoken

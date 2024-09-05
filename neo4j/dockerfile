@@ -1,0 +1,4 @@
+FROM neo4j:5.21.0
+RUN cp /var/lib/neo4j/labs/apoc-core-5.21.0-core.jar /var/lib/neo4j/plugins
+COPY apoc.conf /var/lib/neo4j/conf/apoc.conf
+RUN cat /var/lib/neo4j/conf/apoc.conf >> /var/lib/neo4j/conf/neo4j.conf

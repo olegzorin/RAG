@@ -7,8 +7,9 @@ import warnings
 import conf
 from typing import List, Optional, Dict, Any
 
-from core import Ragger
 from pydantic import TypeAdapter, ValidationError, BaseModel
+
+from graph import Grapher
 
 logging.basicConfig(stream=sys.stderr, level=conf.get_log_level())
 
@@ -43,14 +44,14 @@ def run(data: str, outpath: Optional[str] = None):
             decoded = base64.b64decode(data)
             request = TypeAdapter(ActionRequest).validate_json(decoded)
 
-            ragger = Ragger(request.params)
+            grapher = Grapher(request.params)
 
-            answers = ragger.get_answers(request.documentId, request.url, request.questions)
+            answers = grapher.get_answers(request.url, request.questions)
 
             template = _get_non_empty_or_none(request.template)
             examples = _get_non_empty_or_none(request.examples)
             if template is not None or examples is not None:
-                response.outputs = ragger.generate_outputs(answers, template, examples)
+                response.outputs = grapher.generate_outputs(answers, template, examples)
 
             response.answers = answers
             response.success = True
