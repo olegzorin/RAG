@@ -1,11 +1,7 @@
 import logging
 import re
+from typing import Any
 
-import camelot
-import pdf2image
-import pytesseract
-
-from PIL.Image import Image
 from camelot.core import Table
 from camelot.utils import is_url, download_url
 
@@ -31,32 +27,46 @@ def _get_table_rows(table: Table) -> list[str] | None:
     return [row["summary"] for ind, row in df_table.iterrows()]
 
 
-def read_pdf(document_id: int, source: str, text_chunker) -> list[str]:
+def read_pdf(document_id: int, source: str, text_chunkers: list[Any], *, read_tables: bool = True, convert_pdf_to_image: bool = True) -> list[str]:
     chunks: list[str] = []
     try:
         if is_url(source):
             source = download_url(source)
 
-        pages: list[Image] = pdf2image.convert_from_path(pdf_path=source, dpi=300)
+        pages = []
+        if convert_pdf_to_image:
+            import pdf2image
+            import pytesseract
 
-        for page_no, page in enumerate(pages, 1):
-            try:
-                text = pytesseract.image_to_string(page)
-                chunks.extend(text_chunker.split_text(text=text))
-            except UserWarning as w:
-                logger.warning(f"Problem reading text in document_id={document_id}, page_no={page_no}: {str(w)}")
+            pages.extend(pdf2image.convert_from_path(pdf_path=source, dpi=300))
+            for page_no, page in enumerate(pages, 1):
+                try:
+                    text = pytesseract.image_to_string(page)
+                    for text_chunker in text_chunkers:
+                        chunks.extend(text_chunker.split_text(text=text))
+                except UserWarning as w:
+                    raise Exception(f"Problem reading text in document_id={document_id}, page_no={page_no}: {str(w)}")
+        else:
+            from langchain_community.document_loaders import PyMuPDFLoader
 
-        for page_no in range(1, len(pages)):
-            try:
-                table_list = camelot.read_pdf(filepath=source, pages=str(page_no), suppress_stdout=False, backend='ghostscript')
-                for table in table_list:
-                    rows = _get_table_rows(table)
-                    if rows is not None and len(rows) > 0:
-                        chunks.extend(rows)
-            except UserWarning as w:
-                logger.warning(f"Problem reading tables in document_id={document_id}, page_no={page_no}: {str(w)}")
+            pages.extend(PyMuPDFLoader(source).load())
+            for page in pages:
+                for text_chunker in text_chunkers:
+                    chunks.extend(text_chunker.split_text(text=page.page_content))
+
+        if read_tables:
+            from camelot import read_pdf
+
+            for page_no in range(1, len(pages)):
+                try:
+                    table_list = read_pdf(filepath=source, pages=str(page_no), suppress_stdout=False, backend='ghostscript')
+                    for table in table_list:
+                        rows = _get_table_rows(table)
+                        if rows is not None and len(rows) > 0:
+                            chunks.extend(rows)
+                except UserWarning as w:
+                    raise Exception(f"Problem reading tables in document_id={document_id}, page_no={page_no}: {str(w)}")
 
         return list(map(lambda txt: _clean_text(txt), chunks))
     except Exception as e:
         raise RuntimeError(f"Error reading content of documentId={document_id}: {str(e)}")
-

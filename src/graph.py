@@ -1,41 +1,35 @@
-import json
 import logging
 import os
+from operator import itemgetter
+from typing import Dict
 
-import torch
-
-import conf
-
-from langchain_community.document_loaders import PyMuPDFLoader
-from langchain_community.chat_models import ChatOllama
 from langchain_community.graphs import Neo4jGraph
 from langchain_community.vectorstores import Neo4jVector
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableParallel
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_experimental.text_splitter import SemanticChunker
 from langchain_text_splitters import TokenTextSplitter
-
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
-from camelot.utils import is_url, download_url
-
 from neo4j.exceptions import DatabaseError, ClientError
-from operator import itemgetter
-from typing import Dict, List, Any
+
+import conf
+import reader
+from core import RAG
 
 logger = logging.getLogger(__name__)
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 
-class Grapher:
+class GraphSearch(RAG):
 
-    params: Dict
     graph: Neo4jGraph
 
-    def __init__(self, params: Dict):
-        self.params = params
+    def __init__(
+            self,
+            params: Dict
+        ):
+        super().__init__(params)
 
         """
         Delete existing data
@@ -60,35 +54,62 @@ class Grapher:
         except DatabaseError:  # Index didn't exist yet
             pass
 
-
-    def get_answers(self, source: str, questions: list[str]):
-        if is_url(source):
-            source = download_url(source)
-
-        embeddings_model = HuggingFaceEmbeddings(
-            model_name=self.params.get("embeggingsModel", 'all-MiniLM-L6-v2'),
-            cache_folder=conf.resolve_path('embeddingsModel.cacheDir', 'caches/embeddings').as_posix()
-        )
         embedding_dimension = 384
+        # Create vector index for child
+        try:
+            self.graph.query(
+                "CALL db.index.vector.createNodeIndex('parent_document', "
+                "'Child', 'embedding', $dimension, 'cosine')",
+                {"dimension": embedding_dimension},
+            )
+        except ClientError:  # already exists
+            raise
 
-        parent_splitter = TokenTextSplitter(chunk_size=512, chunk_overlap=24)
-        child_splitter = TokenTextSplitter(chunk_size=100, chunk_overlap=24)
+        # Create vector index for parents
+        try:
+            self.graph.query(
+                "CALL db.index.vector.createNodeIndex('typical_rag', "
+                "'Parent', 'embedding', $dimension, 'cosine')",
+                {"dimension": embedding_dimension},
+            )
+        except ClientError:  # already exists
+            raise
 
-        parent_documents = PyMuPDFLoader(source).load_and_split(parent_splitter)
 
-        for i, parent in enumerate(parent_documents):
-            child_documents = child_splitter.split_documents([parent])
+    def get_answers(self, document_id: int, source: str, questions: list[str]) -> list[str]:
+
+        parent_chunkers = [SemanticChunker(embeddings=self.embeddings_model), TokenTextSplitter(chunk_size=512, chunk_overlap=24)]
+        child_chunkers = [SemanticChunker(embeddings=self.embeddings_model), TokenTextSplitter(chunk_size=100, chunk_overlap=24)]
+
+        convert_pdf_to_image = self.params.get("reader.convertPdf2Image", "false") == "true"
+        print(f'convert_pdf_to_image={convert_pdf_to_image}')
+        read_tables = self.params.get("reader.read_tables", "false") == "true"
+        print(f'read_tables={read_tables}')
+        parent_chunks = reader.read_pdf(document_id, source, parent_chunkers, read_tables=read_tables, convert_pdf_to_image=convert_pdf_to_image)
+
+        print(f"parent chunks {len(parent_chunks)}")
+
+        # with open('CCR1.txt', 'w') as f:
+        #     f.write("\n\n".join([d.page_content for d in parent_documents]))
+
+        child_counts: [int] = []
+        for i, parent_chunk in enumerate(parent_chunks):
+            child_chunks = []
+            for chunker in child_chunkers:
+                child_chunks.extend(chunker.split_text(parent_chunk))
+
+            child_counts.append(len(child_chunks))
             params = {
-                "parent_text": parent.page_content,
+                "parent_text": parent_chunk,
                 "parent_id": i,
-                "parent_embedding": embeddings_model.embed_query(parent.page_content),
+                "parent_embedding": self.embeddings_model.embed_query(parent_chunk),
                 "children": [
                     {
-                        "text": c.page_content,
+                        "text": child_chunk,
                         "id": f"{i}-{ic}",
-                        "embedding": embeddings_model.embed_query(c.page_content),
+                        "embedding": self.embeddings_model.embed_query(child_chunk),
                     }
-                    for ic, c in enumerate(child_documents)
+                    for ic, child_chunk in enumerate(child_chunks)
                 ],
             }
             # Ingest data
@@ -97,38 +118,20 @@ class Grapher:
             MERGE (p:Parent {id: $parent_id})
             SET p.text = $parent_text
             WITH p
-            CALL db.create.setVectorProperty(p, 'embedding', $parent_embedding)
-            YIELD node
+            CALL db.create.setNodeVectorProperty(p, 'embedding', $parent_embedding)
             WITH p 
             UNWIND $children AS child
             MERGE (c:Child {id: child.id})
             SET c.text = child.text
             MERGE (c)<-[:HAS_CHILD]-(p)
             WITH c, child
-            CALL db.create.setVectorProperty(c, 'embedding', child.embedding)
-            YIELD node
+            CALL db.create.setNodeVectorProperty(c, 'embedding', child.embedding)
             RETURN count(*)
             """,
                params=params
             )
-            # Create vector index for child
-            try:
-                self.graph.query(
-                    "CALL db.index.vector.createNodeIndex('parent_document', "
-                    "'Child', 'embedding', $dimension, 'cosine')",
-                    {"dimension": embedding_dimension},
-                )
-            except ClientError:  # already exists
-                pass
-            # Create vector index for parents
-            try:
-                self.graph.query(
-                    "CALL db.index.vector.createNodeIndex('typical_rag', "
-                    "'Parent', 'embedding', $dimension, 'cosine')",
-                    {"dimension": embedding_dimension},
-                )
-            except ClientError:  # already exists
-                pass
+
+        print(f'child counts: {child_counts}')
 
         parent_query = """
         MATCH (node)<-[:HAS_CHILD]-(parent)
@@ -137,7 +140,7 @@ class Grapher:
         """
 
         parent_vectorstore = Neo4jVector.from_existing_index(
-            embedding=embeddings_model,
+            embedding=self.embeddings_model,
             url=conf.get_property('neo4j.url'),
             password=conf.get_property('neo4j.password'),
             username=conf.get_property('neo4j.username'),
@@ -154,24 +157,6 @@ class Grapher:
 
         retriever = parent_vectorstore.as_retriever()
 
-        llm = ChatOllama(
-            base_url=conf.get_property('ollama.url'),
-            streaming=True,
-            model=self.params.get('ollama.model', 'llama2'),
-            temperature=float(self.params.get('ollama.temperature', 0.0)),
-            # Increasing the temperature will make the model answer more creatively. (Default: 0.8)
-            seed=int(self.params.get('ollama.seed', 2)),
-            # seed should be set for consistent responses
-            top_k=int(self.params.get('ollama.top_k', 10)),
-            # A higher value (100) will give more diverse answers, while a lower value (10) will be more conservative.
-            top_p=float(self.params.get('ollama.top_p', 0.3)),
-            # Higher value (0.95) will lead to more diverse text, while a lower value (0.5) will generate more focused text.
-            num_ctx=int(self.params.get('ollama.num_ctx', 3072)),
-            # Sets the size of the context window used to generate the next token.
-            num_predict=int(self.params.get('ollama.num_predict', -2))
-            # Maximum number of tokens to predict when generating text. (Default: 128, -1 = infinite generation, -2 = fill context)
-        )
-
         def format_docs(docs):
             return "\n\n".join(doc.page_content for doc in docs)
 
@@ -183,57 +168,12 @@ class Grapher:
                 }
             )
             | prompt
-            | llm
+            | self.llm
             | StrOutputParser()
         )
 
-        return [chain.invoke({'question':question}) for question in questions]
+        answers = []
+        for question in questions:
+            answers.append(chain.invoke({'question':question}))
 
-
-    def generate_outputs(self, texts: List[str], template: Any, examples: List[Any]) -> List[Any]:
-        output_model = self.params.get("output.model", "numind/NuExtract-tiny")
-        output_model_cache_dir = conf.resolve_path('outputsModel.cacheDir', 'caches/outputs')
-
-        try:
-            model = AutoModelForCausalLM.from_pretrained(
-                pretrained_model_name_or_path=output_model,
-                trust_remote_code=True,
-                torch_dtype=torch.bfloat16,
-                cache_dir=output_model_cache_dir
-            )
-            model.eval()
-
-            tokenizer = AutoTokenizer.from_pretrained(
-                pretrained_model_name_or_path=output_model,
-                trust_remote_code=True
-            )
-            model.generation_config.pad_token_id = tokenizer.eos_token_id
-
-            input_llm = ["<|input|>"]
-            if template is not None:
-                input_llm.extend(["### Template:", json.dumps(template, indent=4)])
-
-            if examples is not None:
-                for example in examples:
-                    input_llm.extend(["### Example:", json.dumps(example, indent=4)])
-
-            input_llm.extend(["### Text:", "...", "<|output|>", ""])
-
-            outputs = []
-            max_length = int(self.params.get('tokenizer.max_length', 4000))
-            for text in texts:
-                input_llm[-3] = text
-                input_ids = tokenizer("\n".join(input_llm), return_tensors="pt", truncation=True, max_length=max_length)
-                output = tokenizer.decode(model.generate(**input_ids)[0], skip_special_tokens=True)
-                output = output.split("<|output|>")[1].split("<|end-output|>")[0].strip()
-                try:
-                    outputs.append({} if len(output) == 0 else json.loads(output))
-                except Exception as e:
-                    logger.exception(e)
-                    outputs.append({"error": str(e), "raw": output})
-
-            return outputs
-
-        except Exception as e:
-            logger.exception(e)
-            raise RuntimeError(f"Error generating outputs: {str(e)}")
+        return answers

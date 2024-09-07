@@ -16,10 +16,6 @@ class DB(VectorStore, ABC):
     NEO4J: str = 'neo4j'
 
     @abstractmethod
-    def reset(self):
-        pass
-
-    @abstractmethod
     def close(self):
         pass
 
@@ -44,25 +40,9 @@ class Neo4jDB(Neo4jVector, DB):
             password=get_property('neo4j.password'),
             username=get_property('neo4j.username'),
             embedding=embeddings_model,
+            pre_delete_collection=True,
             logger=logging.getLogger('Neo4jDB')
         )
-
-    def reset(self):
-        """
-        Delete existing data and create a new index
-        """
-        from neo4j.exceptions import DatabaseError
-
-        self.query(
-            f"MATCH (n:`{self.node_label}`) "
-            "CALL { WITH n DETACH DELETE n } "
-            "IN TRANSACTIONS OF 10000 ROWS;"
-        )
-        try:
-            self.query(f"DROP INDEX {self.index_name}")
-        except DatabaseError:  # Index didn't exist yet
-            pass
-
         self.create_new_index()
 
     def close(self):
@@ -82,9 +62,6 @@ class ChromaDB(Chroma, DB):
                 is_persistent=False
             )
         )
-
-    def reset(self):
-        pass
 
     def close(self):
         pass

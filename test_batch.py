@@ -1,6 +1,6 @@
 from typing import Dict
 
-from core import Ragger
+from vector import VectorSearch
 
 params: Dict = {
     "embeggingsModel": "all-MiniLM-L6-v2",
@@ -24,7 +24,7 @@ with open('questions.txt') as qf:
         question_keys.append(kv[0])
         questions.append(kv[1])
 
-ragger = Ragger(params)
+ragger = VectorSearch(params)
 
 for documentId, name in enumerate(names):
     print(f'start {name}')
