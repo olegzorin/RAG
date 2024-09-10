@@ -1,6 +1,5 @@
 import logging
 import re
-from typing import Any
 
 from camelot.core import Table
 from camelot.utils import is_url, download_url
@@ -27,7 +26,15 @@ def _get_table_rows(table: Table) -> list[str] | None:
     return [row["summary"] for ind, row in df_table.iterrows()]
 
 
-def read_pdf(document_id: int, source: str, text_chunkers: list[Any], *, read_tables: bool = True, convert_pdf_to_image: bool = True) -> list[str]:
+def read_pdf(
+        document_id: int,
+        source: str,
+        text_chunker,
+        *,
+        read_tables: bool = True,
+        convert_pdf_to_image: bool = True
+) -> list[str]:
+
     chunks: list[str] = []
     try:
         if is_url(source):
@@ -42,8 +49,7 @@ def read_pdf(document_id: int, source: str, text_chunkers: list[Any], *, read_ta
             for page_no, page in enumerate(pages, 1):
                 try:
                     text = pytesseract.image_to_string(page)
-                    for text_chunker in text_chunkers:
-                        chunks.extend(text_chunker.split_text(text=text))
+                    chunks.extend(text_chunker(text))
                 except UserWarning as w:
                     raise Exception(f"Problem reading text in document_id={document_id}, page_no={page_no}: {str(w)}")
         else:
@@ -51,8 +57,7 @@ def read_pdf(document_id: int, source: str, text_chunkers: list[Any], *, read_ta
 
             pages.extend(PyMuPDFLoader(source).load())
             for page in pages:
-                for text_chunker in text_chunkers:
-                    chunks.extend(text_chunker.split_text(text=page.page_content))
+                chunks.extend(text_chunker(page.page_content))
 
         if read_tables:
             from camelot import read_pdf

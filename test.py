@@ -8,8 +8,8 @@ import main
 def run():
     req = {
         "documentId": 1,
-        # "url": '/Users/oleg/Downloads/LHS 1.pdf',
         "url": '/Users/oleg/Downloads/CCR 1.pdf',
+        # "url": '/Users/oleg/Downloads/LHS 1.pdf',
         "questions": ['What is the EFFECTIVE DATE of this agreement?'],
 # Right answer is 2022-01-04 (PDF Pg 12)?'],
 #         "template": {"Outputs": [{"Key": "", "Value": "", "Type": ""}]},
@@ -19,8 +19,10 @@ def run():
             # {"Output": {"Key": "Level 3 Rate", "Value": "200", "Type": "INT"}}
         # ],
         "params": {
-            "reader.convertPdf2Image": "true",
-            "reader.read_tables" : "false",
+            "reader.chunk_size": "256",
+            "reader.chunk_overlap": "48",
+            "search.method": "graph",  # "graph" (graph == parent/child)
+            "search.type": "bm25",      # only for search method "vector". Comma-separated list of bm25, similarity, mmr
             "ollama.model": "llama3.1",
             "ollama.temperature": "0.0",
             "ollama.seed": "2",

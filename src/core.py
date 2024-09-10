@@ -3,13 +3,30 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Any
 
 import torch
-from langchain_core.embeddings import Embeddings
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.chat_models import ChatOllama
+from langchain_experimental.text_splitter import SemanticChunker
+from langchain_core.embeddings import Embeddings
+from langchain_text_splitters import TokenTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 import conf
 
-class RAG(ABC):
+class Chunker:
+    s: SemanticChunker
+    t: TokenTextSplitter
+    r: RecursiveCharacterTextSplitter
+
+    def __init__(self, embeddings: Embeddings, chunk_size: int, chunk_overlap: int):
+        self.s = SemanticChunker(embeddings)
+        self.t = TokenTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap, length_function=len)
+        self.r = RecursiveCharacterTextSplitter(chunk_size=chunk_size*3/4, chunk_overlap=chunk_overlap, length_function=len)
+
+    def __call__(self, text: str) -> list[str]:
+        return self.s.split_text(text) + self.t.split_text(text) + self.r.split_text(text)
+
+
+class RagSearch(ABC):
     params: Dict
     embeddings_model: Embeddings
     llm: ChatOllama
@@ -26,7 +43,7 @@ class RAG(ABC):
         self.llm = ChatOllama(
             base_url=conf.get_property('ollama.url'),
             streaming=True,
-            model=params.get('ollama.model', 'llama2'),
+            model=params.get('ollama.model', 'llama3.1'),
             temperature=float(params.get('ollama.temperature', 0.0)),
             # Increasing the temperature will make the model answer more creatively. (Default: 0.8)
             seed=int(params.get('ollama.seed', 2)),
@@ -41,13 +58,16 @@ class RAG(ABC):
             # Maximum number of tokens to predict when generating text. (Default: 128, -1 = infinite generation, -2 = fill context)
         )
 
+    def get_text_splitter(self, chunk_size: int, chunk_overlap: int):
+        return Chunker(self.embeddings_model, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+
     @abstractmethod
     def get_answers(self, document_id: int, source: str, questions: list[str]) -> list[str]:
         pass
 
     def generate_outputs(self, texts: List[str], template: Any, examples: List[Any]) -> List[Any]:
 
-        model_name = self.params.get("output.model", "numind/NuExtract-tiny"),
+        model_name = self.params.get("output.model", "numind/NuExtract-tiny")
 
         model_cache_dir = conf.resolve_path('outputsModel.cacheDir', 'caches/outputs')
 
@@ -79,7 +99,7 @@ class RAG(ABC):
             input_llm.extend(["### Text:", "...", "<|output|>", ""])
 
             outputs = []
-            max_length = int(self.params.get('tokenizer.max_length', 4000)),
+            max_length = int(self.params.get('tokenizer.max_length', 4000))
 
             for text in texts:
                 input_llm[-3] = text
@@ -95,3 +115,6 @@ class RAG(ABC):
 
         except Exception as e:
             raise RuntimeError(f"Error generating outputs: {str(e)}")
+
+
+
