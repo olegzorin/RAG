@@ -1,19 +1,37 @@
 import logging
 import os
-from typing import List, Dict
+from typing import Dict
 
 from langchain.retrievers import EnsembleRetriever
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_core.embeddings import Embeddings
+from langchain_experimental.text_splitter import SemanticChunker
+from langchain_text_splitters import TokenTextSplitter
 
-import reader
 from core import RagSearch
 from db import Neo4jDB
+from reader import ExtractedDoc
 
 logger = logging.getLogger(__name__)
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
+class Chunker:
+    s: SemanticChunker
+    t: TokenTextSplitter
+    r: RecursiveCharacterTextSplitter
+
+    def __init__(self, embeddings: Embeddings, chunk_size: int, chunk_overlap: int):
+        self.s = SemanticChunker(embeddings)
+        self.t = TokenTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap, length_function=len)
+        self.r = RecursiveCharacterTextSplitter(chunk_size=(chunk_size * 3) // 4, chunk_overlap=chunk_overlap, length_function=len)
+
+    def __call__(self, text: str) -> list[str]:
+        chunks = []
+        chunks.extend(self.s.split_text(text))
+        chunks.extend(self.t.split_text(text))
+        chunks.extend(self.r.split_text(text))
+        return chunks
 
 
 class SearchType:
@@ -30,31 +48,32 @@ class VectorSearch(RagSearch):
     def __init__(self, params: Dict):
         super().__init__(params)
 
-        print('VectorSearch!')
+        logger.info('VectorSearch!')
 
-        self.search_types = params.get("search.type", SearchType.BM25).split(',')
-        print(f'Search types: ', self.search_types)
+        self.search_types = params.get("search.type", SearchType.SIMILARITY).split(',')
+        logger.info(f'Search types: {self.search_types}')
+
         for search_type in self.search_types:
             if search_type not in SearchType.values:
                 raise TypeError(f"Invalid search type '{search_type}', valid types: {SearchType.values}")
 
 
 
-    def get_answers(self, document_id: int, url: str, questions: List[str]) -> list[str]:
+    def get_answers(
+            self,
+            document: ExtractedDoc,
+            questions: list[str]
+    ) -> list[str]:
+
         chunk_size = int(self.params.get("reader.chunk_size", 384))
         chunk_overlap = int(self.params.get("reader.chunk_overlap", chunk_size//8))
-        chunks = reader.read_pdf(
-            document_id,
-            source=url,
-            text_chunker=self.get_text_splitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap),
-            read_tables=True,
-            convert_pdf_to_image=True
-        )
+        chunker = Chunker(self.embeddings_model, chunk_size, chunk_overlap)
+
+        chunks = document.split_into_chucks(chunker)
 
         vectorstore = None
 
         try:
-
             retrievers = []
             for search_type in self.search_types:
                 if search_type == SearchType.BM25:
@@ -69,33 +88,10 @@ class VectorSearch(RagSearch):
 
                     retrievers.append(vectorstore.as_retriever(search_type=search_type))
 
-            ensemble_retriever = EnsembleRetriever(retrievers=retrievers)
-
-            system_message = self.params.get(
-                'chat_prompt_system_message',
-                "Please give me precise information. Don't be verbose."
+            return self._retrieve_answers(
+                retriever=EnsembleRetriever(retrievers=retrievers),
+                questions=questions
             )
-            rag_prompt = ChatPromptTemplate.from_messages(
-                [
-                    ("system", system_message),
-                    ("user", """<context>
-                        {context}
-                        </context>
-    
-                        Answer the following question: 
-    
-                        {question}"""),
-                ]
-            )
-
-            qa_chain = (
-                    {"context": ensemble_retriever, "question": RunnablePassthrough()}
-                    | rag_prompt
-                    | self.llm
-                    | StrOutputParser()
-            )
-
-            return [qa_chain.invoke(question).strip() for question in questions]
 
         finally:
             if vectorstore is not None:

@@ -2,20 +2,41 @@ import logging
 import os
 from typing import Dict
 
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.graphs import Neo4jGraph
 from langchain_community.vectorstores import Neo4jVector
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.embeddings import Embeddings
+from langchain_experimental.text_splitter import SemanticChunker
+from langchain_text_splitters import TokenTextSplitter
 from neo4j.exceptions import DatabaseError, ClientError
 
 import conf
-import reader
 from core import RagSearch
+from reader import ExtractedDoc
 
 logger = logging.getLogger(__name__)
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
+class ParentChunker:
+    s: SemanticChunker
+
+    def __init__(self, embeddings: Embeddings):
+        self.s = SemanticChunker(embeddings)
+
+    def __call__(self, text: str) -> list[str]:
+        return self.s.split_text(text)
+
+class ChildChunker:
+    t: TokenTextSplitter
+    r: RecursiveCharacterTextSplitter
+
+    def __init__(self, chunk_size: int, chunk_overlap: int):
+        self.t = TokenTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap, length_function=len)
+        self.r = RecursiveCharacterTextSplitter(chunk_size=(chunk_size * 3) // 4, chunk_overlap=chunk_overlap, length_function=len)
+
+    def __call__(self, text: str) -> list[str]:
+        return self.t.split_text(text) + self.r.split_text(text)
 
 
 class GraphSearch(RagSearch):
@@ -27,7 +48,7 @@ class GraphSearch(RagSearch):
     ):
         super().__init__(params)
 
-        print('GraphSearch!')
+        logger.info('GraphSearch!')
 
         """
         Delete existing data
@@ -54,13 +75,12 @@ class GraphSearch(RagSearch):
 
 
     def _create_indexes(self):
-        embedding_dimension = 384
         # Create vector index for child
         try:
             self.graph.query(
                 "CALL db.index.vector.createNodeIndex('parent_document', "
                 "'Child', 'embedding', $dimension, 'cosine')",
-                {"dimension": embedding_dimension},
+                {"dimension": self.embeddings_dimension},
             )
         except ClientError:  # already exists
             pass
@@ -70,23 +90,26 @@ class GraphSearch(RagSearch):
             self.graph.query(
                 "CALL db.index.vector.createNodeIndex('typical_rag', "
                 "'Parent', 'embedding', $dimension, 'cosine')",
-                {"dimension": embedding_dimension},
+                {"dimension": self.embeddings_dimension},
             )
         except ClientError:  # already exists
             pass
 
 
-    def get_answers(self, document_id: int, source: str, questions: list[str]) -> list[str]:
+    def get_answers(
+            self,
+            document: ExtractedDoc,
+            questions: list[str]
+    ) -> list[str]:
 
         chunk_size = int(self.params.get("reader.chunk_size", 384))
-        chunk_overlap = int(self.params.get("reader.chunk_overlap", chunk_size/8))
+        chunk_overlap = int(self.params.get("reader.chunk_overlap", chunk_size//8))
 
-        parent_chunker = self.get_text_splitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-        child_chunker = self.get_text_splitter(chunk_size=chunk_size//3, chunk_overlap=chunk_overlap//3)
+        parent_chunker = ParentChunker(self.embeddings_model)
+        child_chunker = ChildChunker(chunk_size=chunk_size//3, chunk_overlap=chunk_overlap//3)
 
-        parent_chunks = reader.read_pdf(document_id, source, parent_chunker, read_tables=True, convert_pdf_to_image=True)
-
-        print(f"parent chunks {len(parent_chunks)}")
+        parent_chunks = document.split_into_chucks(parent_chunker)
+        logger.debug(f"parent chunks {len(parent_chunks)}")
 
         child_counts: [int] = []
         for i, parent_chunk in enumerate(parent_chunks):
@@ -128,7 +151,7 @@ class GraphSearch(RagSearch):
             self._create_indexes()
 
 
-        print(f'child counts: {child_counts}')
+        logger.debug(f'child counts: {child_counts}')
 
         parent_query = """
         MATCH (node)<-[:HAS_CHILD]-(parent)
@@ -145,34 +168,7 @@ class GraphSearch(RagSearch):
             retrieval_query=parent_query,
         )
 
-        retriever = parent_vectorstore.as_retriever()
-
-        system_message = self.params.get(
-            'chat_prompt_system_message',
-            "Please give me precise information. Don't be verbose."
+        return self._retrieve_answers(
+            retriever=parent_vectorstore.as_retriever(),
+            questions=questions
         )
-        rag_prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", system_message),
-                ("user", """<context>
-                    {context}
-                    </context>
-
-                    Answer the following question: 
-
-                    {question}"""),
-            ]
-        )
-
-        qa_chain = (
-                {"context": retriever, "question": RunnablePassthrough()}
-                | rag_prompt
-                | self.llm
-                | StrOutputParser()
-        )
-
-        answers = []
-        for question in questions:
-            answers.append(qa_chain.invoke(question).strip())
-
-        return answers

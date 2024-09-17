@@ -1,29 +1,23 @@
 import base64
 import json
-import logging
 import re
 import sys
-import warnings
+import time
 from typing import List, Optional, Dict, Any
 
 from pydantic import TypeAdapter, ValidationError, BaseModel
 
-import conf
+import reader
 from core import RagSearch
 from graph import GraphSearch
+from reader import ExtractedDoc
 from vector import VectorSearch
-
-logging.basicConfig(stream=sys.stderr, level=conf.get_log_level())
-
-warnings.filterwarnings(action="ignore", category=DeprecationWarning)
-warnings.filterwarnings(action="ignore", category=FutureWarning)
-warnings.filterwarnings(action="error", category=UserWarning)
 
 
 class ActionRequest(BaseModel):
     documentId: int
     url: str
-    questions: List[str]
+    questions: Optional[List[str]] = None
     template: Optional[Any] = None
     examples: Optional[List[Any]] = None
     params: Optional[Dict] = {}
@@ -33,7 +27,8 @@ class ActionResponse(BaseModel):
     success: bool = False
     answers: List[str] = None
     outputs: List[Any] = None
-    errorMessage: str = None
+    errorMessage: str = None,
+    executionTime: int = 0
 
 
 param_keys = [
@@ -50,7 +45,8 @@ param_keys = [
     "ollama.top_p",
     "ollama.num_ctx",
     "ollama.num_predict",
-    "output.model"
+    "output.model",
+    "tokenizer.max_length"
 ]
 
 def _get_rag_search(params: Dict) -> RagSearch:
@@ -61,7 +57,6 @@ def _get_rag_search(params: Dict) -> RagSearch:
         return GraphSearch(params)
     else:
         raise AttributeError(f"Invalid search method {search_method}")
-
 
 def run(data: str, outpath: Optional[str] = None):
     response = ActionResponse()
@@ -77,16 +72,21 @@ def run(data: str, outpath: Optional[str] = None):
                 if not k in param_keys:
                     raise KeyError(f"Invalid param key: {k}")
 
-            rag_search: RagSearch = _get_rag_search(request.params)
+            document: ExtractedDoc = reader.read_pdf(request.documentId, request.url)
 
-            answers = rag_search.get_answers(request.documentId, request.url, request.questions)
+            start_time = time.time_ns()
 
-            template = _get_non_empty_or_none(request.template)
-            examples = _get_non_empty_or_none(request.examples)
-            if template is not None or examples is not None:
-                response.outputs = rag_search.generate_outputs(texts=answers, template=template, examples=examples)
+            if request.questions:
+                rag_search: RagSearch = _get_rag_search(request.params)
+                answers = rag_search.get_answers(document, request.questions)
+                template = _get_non_empty_or_none(request.template)
+                examples = _get_non_empty_or_none(request.examples)
+                if template is not None or examples is not None:
+                    response.outputs = rag_search.generate_outputs(texts=answers, template=template, examples=examples)
 
-            response.answers = answers
+                response.answers = answers
+
+            response.executionTime = (time.time_ns() - start_time) // 1000_000
             response.success = True
 
         except ValidationError as ve:

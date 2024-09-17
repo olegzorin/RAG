@@ -14,6 +14,7 @@ opencv-python
 ghostscript
 transformers
 pdf2image
+img2table
 pytesseract
 chromadb
 rank_bm25
