@@ -22,10 +22,12 @@ done
 NEO4J_PASSWORD=pr0baPera
 
 NEO4J_LOGS=${PPC_HOME:-/opt/greenxserver}/ragagent/neo4j/logs
+NEO4J_DATA=${PPC_HOME:-/opt/greenxserver}/ragagent/neo4j/data
 
 docker run --detach \
     --restart always \
     --publish=7474:7474 --publish=7687:7687 \
     --env NEO4J_AUTH=neo4j/"$NEO4J_PASSWORD" \
     --volume="$NEO4J_LOGS":/logs \
+    --volume="$NEO4J_DATA":/data \
     "$NEO4J_IMAGE"

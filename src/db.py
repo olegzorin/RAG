@@ -5,9 +5,10 @@ from langchain_core.embeddings import Embeddings
 
 from conf import get_property
 
+logger = logging.getLogger(__name__)
+logger.setLevel(level=logging.WARNING)
 
 # import chromadb.config
-
 
 # class VectorDB(VectorStore, ABC):
 #
@@ -41,8 +42,9 @@ class Neo4jDB(Neo4jVector):
             username=get_property('neo4j.username'),
             embedding=embeddings_model,
             pre_delete_collection=True,
-            logger=logging.getLogger('Neo4jDB')
+            logger=logger
         )
+        logging.getLogger('neo4j.pool').setLevel(logging.WARNING)
         self.create_new_index()
 
     def close(self):

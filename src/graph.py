@@ -11,21 +11,30 @@ from langchain_text_splitters import TokenTextSplitter
 from neo4j.exceptions import DatabaseError, ClientError
 
 import conf
-from core import RagSearch
+from core import RagSearch, MAX_CHUNK_SIZE
 from reader import ExtractedDoc
 
 logger = logging.getLogger(__name__)
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
+
 class ParentChunker:
     s: SemanticChunker
 
-    def __init__(self, embeddings: Embeddings):
-        self.s = SemanticChunker(embeddings)
+    def __init__(
+            self,
+            embeddings: Embeddings,
+            number_of_chunks: int
+    ):
+        self.s = SemanticChunker(
+            embeddings=embeddings,
+            number_of_chunks=number_of_chunks
+        )
 
     def __call__(self, text: str) -> list[str]:
-        return self.s.split_text(text)
+        return [chunk for chunk in self.s.split_text(text) if len(chunk) <= MAX_CHUNK_SIZE]
+
 
 class ChildChunker:
     t: TokenTextSplitter
@@ -36,7 +45,10 @@ class ChildChunker:
         self.r = RecursiveCharacterTextSplitter(chunk_size=(chunk_size * 3) // 4, chunk_overlap=chunk_overlap, length_function=len)
 
     def __call__(self, text: str) -> list[str]:
-        return self.t.split_text(text) + self.r.split_text(text)
+        chunks = []
+        chunks.extend([chunk for chunk in self.t.split_text(text) if len(chunk) <= MAX_CHUNK_SIZE])
+        chunks.extend([chunk for chunk in self.r.split_text(text) if len(chunk) <= MAX_CHUNK_SIZE])
+        return chunks
 
 
 class GraphSearch(RagSearch):
@@ -73,7 +85,6 @@ class GraphSearch(RagSearch):
         except DatabaseError:  # Index didn't exist yet
             pass
 
-
     def _create_indexes(self):
         # Create vector index for child
         try:
@@ -95,7 +106,6 @@ class GraphSearch(RagSearch):
         except ClientError:  # already exists
             pass
 
-
     def get_answers(
             self,
             document: ExtractedDoc,
@@ -103,10 +113,16 @@ class GraphSearch(RagSearch):
     ) -> list[str]:
 
         chunk_size = int(self.params.get("reader.chunk_size", 384))
-        chunk_overlap = int(self.params.get("reader.chunk_overlap", chunk_size//8))
+        chunk_overlap = int(self.params.get("reader.chunk_overlap", chunk_size // 8))
 
-        parent_chunker = ParentChunker(self.embeddings_model)
-        child_chunker = ChildChunker(chunk_size=chunk_size//3, chunk_overlap=chunk_overlap//3)
+        parent_chunker = ParentChunker(
+            embeddings=self.embeddings_model,
+            number_of_chunks=document.get_content_length() // chunk_size
+        )
+        child_chunker = ChildChunker(
+            chunk_size=chunk_size // 3,
+            chunk_overlap=chunk_overlap // 3
+        )
 
         parent_chunks = document.split_into_chucks(parent_chunker)
         logger.debug(f"parent chunks {len(parent_chunks)}")
@@ -149,7 +165,6 @@ class GraphSearch(RagSearch):
             )
 
             self._create_indexes()
-
 
         logger.debug(f'child counts: {child_counts}')
 

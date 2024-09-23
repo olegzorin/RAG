@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 import re
 import sys
 import time
@@ -27,7 +28,7 @@ class ActionResponse(BaseModel):
     success: bool = False
     answers: List[str] = None
     outputs: List[Any] = None
-    errorMessage: str = None,
+    errorMessage: str = None
     executionTime: int = 0
 
 
@@ -38,6 +39,7 @@ param_keys = [
     "search.method",
     "search.type",
     "embeddings.model",
+    "embeddings.use_gpu",
     "ollama.model",
     "ollama.temperature",
     "ollama.seed",
@@ -46,6 +48,7 @@ param_keys = [
     "ollama.num_ctx",
     "ollama.num_predict",
     "output.model",
+    "output.use_gpu",
     "tokenizer.max_length"
 ]
 
@@ -72,7 +75,10 @@ def run(data: str, outpath: Optional[str] = None):
                 if not k in param_keys:
                     raise KeyError(f"Invalid param key: {k}")
 
-            document: ExtractedDoc = reader.read_pdf(request.documentId, request.url)
+            document: ExtractedDoc = reader.read_pdf(
+                document_id=request.documentId,
+                source=request.url
+            )
 
             start_time = time.time_ns()
 
@@ -96,7 +102,8 @@ def run(data: str, outpath: Optional[str] = None):
         except KeyError as ke:
             response.errorMessage = f"{ke}"
         except Exception as e:
-            response.errorMessage = f'Unexpected exception: {e}'
+            logging.exception(e)
+            response.errorMessage = 'Unexpected exception'
 
         result = TypeAdapter(ActionResponse).dump_json(response, exclude_none=True)
 

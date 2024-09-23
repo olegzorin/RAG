@@ -15,21 +15,36 @@ props_path = Path(ppc_home, 'config', 'properties', 'ragagent.properties')
 with open(props_path, 'rb') as props_file:
     properties.load(props_file)
 
+
 def get_property(key: str, default: str = None) -> str:
     return properties.get(f'ppc.ragagent.{key}', PropertyTuple(data=default, meta=None)).data
 
+
 def resolve_path(property_key: str, default_path: str) -> Path:
     return Path(ppc_home, 'ragagent', get_property(property_key, default_path))
+
 
 # Logging
 
 def _get_log_level() -> int:
     return int(properties.get(f'ppc.ragagent.logLevel', PropertyTuple(data=logging.WARN, meta=None)).data)
 
-logging.basicConfig(stream=sys.stderr, level=_get_log_level())
 
-warnings.filterwarnings(action="ignore", category=DeprecationWarning)
-warnings.filterwarnings(action="ignore", category=FutureWarning)
-warnings.filterwarnings(action="error", category=UserWarning)
+logging.basicConfig(
+    stream=sys.stderr,
+    level=_get_log_level(),
+    force=True
+)
 
-
+warnings.filterwarnings(
+    action="ignore",
+    category=DeprecationWarning
+)
+warnings.filterwarnings(
+    action="ignore",
+    category=FutureWarning
+)
+warnings.filterwarnings(
+    action="error",
+    category=UserWarning
+)

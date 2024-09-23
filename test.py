@@ -1,32 +1,39 @@
 import base64
 import json
-import time
+import logging
 
 import main
+
+logging.basicConfig(
+    level=logging.INFO,
+    force=True)
+
 
 
 def run():
     req = {
         "documentId": 1,
-        "url": '/Users/oleg/Downloads/CCR 1.pdf',
+        "url": 'CCR_1.pdf',
         # "url": 'https://s3.amazonaws.com/sbox.ragdoc/208?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20240912T083501Z&X-Amz-SignedHeaders=host&X-Amz-Credential=AKIAJPAZDO6JTXZ6FQSQ%2F20240912%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Expires=43200&X-Amz-Signature=289844399c6135026e37117ba5628273474dc99af242ab996e1682c5ba79c05f',
         # "url": '/opt/greenxserver/ragagent/python-test/CCR_1.pdf',
         "questions": ['What is the EFFECTIVE DATE of this agreement?'],
 # Right answer is 2022-01-04 (PDF Pg 12)?'],
-#         "template": {"Outputs": [{"Key": "", "Value": "", "Type": ""}]},
-#         "examples": [
-#             {"Output":{"Key":"Level 1 Rate","Value":"100","Type":"INT"}},
-#             {"Output":{"Key":"Level 2 Rate","Value":"150","Type":"INT"}},
-#             {"Output": {"Key": "Level 3 Rate", "Value": "200", "Type": "INT"}}
-#         ],
+        "template": {"Outputs": [{"Key": "", "Value": "", "Type": ""}]},
+        "examples": [
+            {"Output":{"Key":"Level 1 Rate","Value":"100","Type":"INT"}},
+            {"Output":{"Key":"Level 2 Rate","Value":"150","Type":"INT"}},
+            {"Output": {"Key": "Level 3 Rate", "Value": "200", "Type": "INT"}}
+        ],
         "params": {
-            "reader.chunk_size": "384",
+            "embeddings.use_gpu": "False",
+            "output.use_gpu": "False",
+            "reader.chunk_size": "300",
             "reader.chunk_overlap": "48",
-            "reader.stop_on_table_errors": "false",
             "embeddings.model": "BAAI/bge-m3",  # replaces previously used "all-MiniLM-L6-v2"
             "search.method": "vector",    # "vector" or "graph" (aka parent/child)
             "search.type": "similarity",  # only for search method "vector". Comma-separated list of bm25, similarity, mmr
-            "ollama.model": "llama3.1",   # to be installed later: "eas/dragon-yi-v0"
+            # "ollama.model": "llama3.1",   # to be installed later: "eas/dragon-yi-v0"
+            "ollama.model": "eas/dragon-yi-v0",
             "ollama.temperature": "0.0",
             "ollama.seed": "2",
             "ollama.top_k": "10",

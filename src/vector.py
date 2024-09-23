@@ -8,7 +8,7 @@ from langchain_core.embeddings import Embeddings
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_text_splitters import TokenTextSplitter
 
-from core import RagSearch
+from core import RagSearch, MAX_CHUNK_SIZE
 from db import Neo4jDB
 from reader import ExtractedDoc
 
@@ -21,16 +21,36 @@ class Chunker:
     t: TokenTextSplitter
     r: RecursiveCharacterTextSplitter
 
-    def __init__(self, embeddings: Embeddings, chunk_size: int, chunk_overlap: int):
-        self.s = SemanticChunker(embeddings)
-        self.t = TokenTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap, length_function=len)
-        self.r = RecursiveCharacterTextSplitter(chunk_size=(chunk_size * 3) // 4, chunk_overlap=chunk_overlap, length_function=len)
+    def __init__(
+            self,
+            embeddings: Embeddings,
+            text_size: int,
+            chunk_size: int,
+            chunk_overlap: int
+    ):
+        self.s = SemanticChunker(
+            embeddings=embeddings,
+            number_of_chunks=text_size//chunk_size
+        )
+        self.t = TokenTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            length_function=len
+        )
+        self.r = RecursiveCharacterTextSplitter(
+            chunk_size=(chunk_size * 3) // 4,
+            chunk_overlap=chunk_overlap,
+            length_function=len
+        )
 
-    def __call__(self, text: str) -> list[str]:
+    def __call__(
+            self,
+            text: str
+    ) -> list[str]:
         chunks = []
-        chunks.extend(self.s.split_text(text))
-        chunks.extend(self.t.split_text(text))
-        chunks.extend(self.r.split_text(text))
+        chunks.extend([chunk for chunk in self.s.split_text(text) if len(chunk) <= MAX_CHUNK_SIZE])
+        chunks.extend([chunk for chunk in self.t.split_text(text) if len(chunk) <= MAX_CHUNK_SIZE])
+        chunks.extend([chunk for chunk in self.r.split_text(text) if len(chunk) <= MAX_CHUNK_SIZE])
         return chunks
 
 
@@ -65,9 +85,16 @@ class VectorSearch(RagSearch):
             questions: list[str]
     ) -> list[str]:
 
+        text_size = document.get_content_length()
         chunk_size = int(self.params.get("reader.chunk_size", 384))
         chunk_overlap = int(self.params.get("reader.chunk_overlap", chunk_size//8))
-        chunker = Chunker(self.embeddings_model, chunk_size, chunk_overlap)
+
+        chunker = Chunker(
+            embeddings=self.embeddings_model,
+            text_size=text_size,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap
+        )
 
         chunks = document.split_into_chucks(chunker)
 
@@ -84,6 +111,7 @@ class VectorSearch(RagSearch):
                 else:
                     if vectorstore is None:
                         vectorstore = Neo4jDB(embeddings_model=self.embeddings_model)
+                        logging.getLogger("neo4j.pool").setLevel(logging.WARNING)
                         vectorstore.add_texts(chunks)
 
                     retrievers.append(vectorstore.as_retriever(search_type=search_type))
@@ -92,6 +120,9 @@ class VectorSearch(RagSearch):
                 retriever=EnsembleRetriever(retrievers=retrievers),
                 questions=questions
             )
+        except Exception as e:
+            logger.exception(e)
+            raise e
 
         finally:
             if vectorstore is not None:

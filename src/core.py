@@ -1,5 +1,5 @@
 import json
-import time
+import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any
 
@@ -15,21 +15,26 @@ from langchain_core.runnables import RunnablePassthrough
 import conf
 from reader import ExtractedDoc
 
-cache_folder = conf.resolve_path('model.cacheDir', 'caches').as_posix()
+cache_folder = conf.resolve_path('models.cacheDir', 'caches').as_posix()
+gpu_device = conf.get_property('instance.gpuDevice', 'cpu')
 
-DEFAULT_EMBEDDINGS_MODEL = "BAAI/bge-m3"  # "all-MiniLM-L6-v2"
+DEFAULT_EMBEDDINGS_MODEL = "BAAI/bge-m3"
+# DEFAULT_EMBEDDINGS_MODEL = "all-MiniLM-L6-v2"
 DEFAULT_GENERATIVE_MODEL = "llama3.1"  # "eas/dragon-yi-v0"
 DEFAULT_OUTPUTS_MODEL = "numind/NuExtract-tiny"
 
-CUDA_PARAMS = {}  # {'device': 'cuda'}
+logger = logging.getLogger(__name__)
 
+def _empty_cache(device: str):
+    if device == 'cuda':
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
 
-def _empty_cache():
-    import gc
-    gc.collect()
-    import torch
-    torch.cuda.empty_cache()
+MAX_CHUNK_SIZE=1500
 
+mps_available = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+cuda_available = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
 
 class RagSearch(ABC):
     params: Dict
@@ -37,14 +42,27 @@ class RagSearch(ABC):
     embeddings_dimension: int
     llm: ChatOllama
 
+    def _get_computing_device(self, param_key: str, default_value: bool) -> str:
+        no_gpu = self.params.get(param_key, str(default_value)).lower() == 'false'
+        return 'cpu' if no_gpu else 'mps' if mps_available else 'cuda' if cuda_available else 'cpu'
+
     def __init__(self, params: Dict):
 
         self.params = params
 
+        embeddings_model = params.get("embeddings.model", DEFAULT_EMBEDDINGS_MODEL)
+        logger.info(f"Embeddings model: {embeddings_model}")
+
+        computing_device = self._get_computing_device("embeddings.use_gpu", True)
+        logger.info(f"Embeddings computing device: {computing_device}")
+        _empty_cache(computing_device)
+
+        model_kwargs = {'device': computing_device}
         encode_kwargs = {'normalize_embeddings': True}
+
         self.embeddings_model = HuggingFaceBgeEmbeddings(
-            model_name=params.get("embeddings.model", DEFAULT_EMBEDDINGS_MODEL),
-            model_kwargs=CUDA_PARAMS,
+            model_name=embeddings_model,
+            model_kwargs=model_kwargs,
             encode_kwargs=encode_kwargs,
             cache_folder=cache_folder
         )
@@ -121,13 +139,14 @@ class RagSearch(ABC):
             texts: List[str],
             template: Any,
             examples: List[Any]
-    ) -> (int, List[Any]):
+    ) -> List[Any]:
 
-        start_time = time.time_ns()
+        device = self._get_computing_device("output.use_gpu", True)
+        logger.info(f"Output computing device: {device}")
 
         model_name = self.params.get("output.model", DEFAULT_OUTPUTS_MODEL)
 
-        print("model name: " + model_name)
+        logger.info("model name: " + model_name)
 
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -138,7 +157,7 @@ class RagSearch(ABC):
                 torch_dtype=torch.bfloat16,
                 cache_dir=cache_folder
             )
-            # model.to('cuda')
+            model.to(device)
             model.eval()
 
             tokenizer = AutoTokenizer.from_pretrained(
@@ -159,23 +178,19 @@ class RagSearch(ABC):
 
             outputs = []
             max_length = int(self.params.get('tokenizer.max_length', 4000))
-            print(f'max length = {max_length}')
 
             for text in texts:
                 input_llm[-3] = text
-                input_ids = tokenizer("\n".join(input_llm), return_tensors="pt", truncation=True, max_length=max_length)
+                input_ids = tokenizer("\n".join(input_llm), return_tensors="pt", truncation=True, max_length=max_length).to(device)
                 output = tokenizer.decode(model.generate(**input_ids)[0], skip_special_tokens=True)
-                _empty_cache()
+                _empty_cache(device)
                 output = output.split("<|output|>")[1].split("<|end-output|>")[0].strip()
                 try:
                     outputs.append({} if len(output) == 0 else json.loads(output))
                 except Exception as e:
                     outputs.append({"error": str(e), "raw": output})
 
-            end_time = time.time_ns()
-            elapsed_time_ms = (end_time - start_time) // 1000_000
-
-            return elapsed_time_ms, outputs
+            return outputs
 
         except Exception as e:
-            raise RuntimeError(f"Error generating outputs: {str(e)}")
+            raise RuntimeError(f"Error generating outputs: {e}")

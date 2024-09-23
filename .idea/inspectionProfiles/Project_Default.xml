@@ -429,9 +429,7 @@
     <inspection_tool class="PyCompatibilityInspection" enabled="true" level="WARNING" enabled_by_default="true">
       <option name="ourVersions">
         <value>
-          <list size="1">
-            <item index="0" class="java.lang.String" itemvalue="3.11" />
-          </list>
+          <list size="0" />
         </value>
       </option>
     </inspection_tool>
