@@ -9,10 +9,14 @@ from typing import List, Optional, Dict, Any
 from pydantic import TypeAdapter, ValidationError, BaseModel
 
 import reader
+from conf import set_logging
 from core import RagSearch
 from graph import GraphSearch
+from keywords import KeywordSearch
 from reader import ExtractedDoc
 from vector import VectorSearch
+
+set_logging()
 
 
 class ActionRequest(BaseModel):
@@ -52,14 +56,18 @@ param_keys = [
     "tokenizer.max_length"
 ]
 
+
 def _get_rag_search(params: Dict) -> RagSearch:
     search_method = params.get("search.method", "vector")
     if search_method == 'vector':
         return VectorSearch(params)
     elif search_method == 'graph':
         return GraphSearch(params)
+    elif search_method == 'keywords':
+        return KeywordSearch(params)
     else:
         raise AttributeError(f"Invalid search method {search_method}")
+
 
 def run(data: str, outpath: Optional[str] = None):
     response = ActionResponse()

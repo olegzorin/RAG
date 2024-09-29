@@ -11,7 +11,7 @@ from langchain_text_splitters import TokenTextSplitter
 from neo4j.exceptions import DatabaseError, ClientError
 
 import conf
-from core import RagSearch, MAX_CHUNK_SIZE
+from core import RagSearch, SemanticSplitter, ParagraphSplitter
 from reader import ExtractedDoc
 
 logger = logging.getLogger(__name__)
@@ -32,8 +32,8 @@ class ParentChunker:
             number_of_chunks=number_of_chunks
         )
 
-    def __call__(self, text: str) -> list[str]:
-        return [chunk for chunk in self.s.split_text(text) if len(chunk) <= MAX_CHUNK_SIZE]
+    def split_text(self, text: str) -> list[str]:
+        return self.s.split_text(text)
 
 
 class ChildChunker:
@@ -42,13 +42,16 @@ class ChildChunker:
 
     def __init__(self, chunk_size: int, chunk_overlap: int):
         self.t = TokenTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap, length_function=len)
-        self.r = RecursiveCharacterTextSplitter(chunk_size=(chunk_size * 3) // 4, chunk_overlap=chunk_overlap, length_function=len)
+        self.r = RecursiveCharacterTextSplitter(
+            chunk_size=(chunk_size * 3) // 4,
+            chunk_overlap=chunk_overlap,
+            length_function=len
+        )
 
-    def __call__(self, text: str) -> list[str]:
-        chunks = []
-        chunks.extend([chunk for chunk in self.t.split_text(text) if len(chunk) <= MAX_CHUNK_SIZE])
-        chunks.extend([chunk for chunk in self.r.split_text(text) if len(chunk) <= MAX_CHUNK_SIZE])
-        return chunks
+    def split_text(self, text: str) -> list[str]:
+        t_chunks = self.t.split_text(text)
+        r_chunks = self.r.split_text(text)
+        return [*t_chunks, *r_chunks]
 
 
 class GraphSearch(RagSearch):
@@ -112,24 +115,19 @@ class GraphSearch(RagSearch):
             questions: list[str]
     ) -> list[str]:
 
-        chunk_size = int(self.params.get("reader.chunk_size", 384))
-        chunk_overlap = int(self.params.get("reader.chunk_overlap", chunk_size // 8))
+        chunk_size = int(self.params.get("reader.chunk_size", 1000))
 
-        parent_chunker = ParentChunker(
+        parent_chunker = SemanticSplitter(
             embeddings=self.embeddings_model,
-            number_of_chunks=document.get_content_length() // chunk_size
-        )
-        child_chunker = ChildChunker(
-            chunk_size=chunk_size // 3,
-            chunk_overlap=chunk_overlap // 3
+            chunk_size=chunk_size
         )
 
-        parent_chunks = document.split_into_chucks(parent_chunker)
+        parent_chunks = document.split_into_chucks([parent_chunker])
         logger.debug(f"parent chunks {len(parent_chunks)}")
 
         child_counts: [int] = []
         for i, parent_chunk in enumerate(parent_chunks):
-            child_chunks = child_chunker(parent_chunk)
+            child_chunks = ParagraphSplitter.split_text(parent_chunk)
 
             child_counts.append(len(child_chunks))
             params = {

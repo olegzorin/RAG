@@ -30,21 +30,24 @@ def _get_log_level() -> int:
     return int(properties.get(f'ppc.ragagent.logLevel', PropertyTuple(data=logging.WARN, meta=None)).data)
 
 
-logging.basicConfig(
-    stream=sys.stderr,
-    level=_get_log_level(),
-    force=True
-)
+def set_logging():
+    logging.basicConfig(
+        stream=sys.stderr,
+        format='%(asctime)s %(levelname)-8s %(message)s',
+        level=_get_log_level(),
+        datefmt='%Y-%m-%d %H:%M:%S',
+        force=True
+    )
 
-warnings.filterwarnings(
-    action="ignore",
-    category=DeprecationWarning
-)
-warnings.filterwarnings(
-    action="ignore",
-    category=FutureWarning
-)
-warnings.filterwarnings(
-    action="error",
-    category=UserWarning
-)
+    warnings.filterwarnings(
+        action="ignore",
+        category=DeprecationWarning
+    )
+    warnings.filterwarnings(
+        action="ignore",
+        category=FutureWarning
+    )
+    warnings.filterwarnings(
+        action="error",
+        category=UserWarning
+    )

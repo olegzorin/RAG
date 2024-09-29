@@ -1,7 +1,7 @@
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 import torch
 from langchain_community.chat_models import ChatOllama
@@ -11,12 +11,13 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables import RunnablePassthrough
+from langchain_experimental.text_splitter import SemanticChunker
 
-import conf
+from conf import get_property, resolve_path
 from reader import ExtractedDoc
 
-cache_folder = conf.resolve_path('models.cacheDir', 'caches').as_posix()
-gpu_device = conf.get_property('instance.gpuDevice', 'cpu')
+cache_folder = resolve_path('models.cacheDir', 'caches').as_posix()
+gpu_device = get_property('instance.gpuDevice', 'cpu')
 
 DEFAULT_EMBEDDINGS_MODEL = "BAAI/bge-m3"
 # DEFAULT_EMBEDDINGS_MODEL = "all-MiniLM-L6-v2"
@@ -25,26 +26,61 @@ DEFAULT_OUTPUTS_MODEL = "numind/NuExtract-tiny"
 
 logger = logging.getLogger(__name__)
 
-def _empty_cache(device: str):
+gpu_device = 'cuda' if torch.cuda.is_available() \
+    else 'mps' if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() \
+    else 'cpu'
+
+
+def _empty_gpu_cache(device: str):
     if device == 'cuda':
         import gc
         gc.collect()
         torch.cuda.empty_cache()
 
-MAX_CHUNK_SIZE=1500
 
-mps_available = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-cuda_available = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+MAX_CHUNK_SIZE = 3000
+
+
+class ParagraphSplitter:
+    @staticmethod
+    def split_text(text: str) -> list[str]:
+        chunks = []
+        par = []
+        for line in text.splitlines():
+            if line:
+                par.append(line)
+            elif par:
+                chunks.append('\n'.join(par))
+                par = []
+        if par:
+            chunks.append('\n'.join(par))
+        return chunks
+
+
+class SemanticSplitter(SemanticChunker):
+    def __init__(
+            self,
+            embeddings: Embeddings,
+            chunk_size: Optional[int] = None
+    ):
+        super().__init__(
+            embeddings=embeddings
+        )
+        self.chunk_size = chunk_size
+
+    def split_text(
+            self,
+            text: str
+    ) -> list[str]:
+        self.number_of_chunks = len(text) // self.chunk_size if self.chunk_size else None
+        return super().split_text(text)
+
 
 class RagSearch(ABC):
-    params: Dict
-    embeddings_model: Embeddings
-    embeddings_dimension: int
-    llm: ChatOllama
 
     def _get_computing_device(self, param_key: str, default_value: bool) -> str:
         no_gpu = self.params.get(param_key, str(default_value)).lower() == 'false'
-        return 'cpu' if no_gpu else 'mps' if mps_available else 'cuda' if cuda_available else 'cpu'
+        return 'cpu' if no_gpu else gpu_device
 
     def __init__(self, params: Dict):
 
@@ -55,7 +91,7 @@ class RagSearch(ABC):
 
         computing_device = self._get_computing_device("embeddings.use_gpu", True)
         logger.info(f"Embeddings computing device: {computing_device}")
-        _empty_cache(computing_device)
+        _empty_gpu_cache(computing_device)
 
         model_kwargs = {'device': computing_device}
         encode_kwargs = {'normalize_embeddings': True}
@@ -70,7 +106,7 @@ class RagSearch(ABC):
         self.embeddings_dimension = len(self.embeddings_model.embed_query("foo"))
 
         self.llm = ChatOllama(
-            base_url=conf.get_property('ollama.url'),
+            base_url=get_property('ollama.url'),
             streaming=True,
             model=params.get('ollama.model', DEFAULT_GENERATIVE_MODEL),
             temperature=float(params.get('ollama.temperature', 0.0)),
@@ -181,9 +217,14 @@ class RagSearch(ABC):
 
             for text in texts:
                 input_llm[-3] = text
-                input_ids = tokenizer("\n".join(input_llm), return_tensors="pt", truncation=True, max_length=max_length).to(device)
+                input_ids = tokenizer(
+                    "\n".join(input_llm),
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=max_length
+                ).to(device)
                 output = tokenizer.decode(model.generate(**input_ids)[0], skip_special_tokens=True)
-                _empty_cache(device)
+                _empty_gpu_cache(device)
                 output = output.split("<|output|>")[1].split("<|end-output|>")[0].strip()
                 try:
                     outputs.append({} if len(output) == 0 else json.loads(output))
