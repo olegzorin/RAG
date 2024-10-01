@@ -21,3 +21,7 @@ rank_bm25
 pysqlite3-binary
 pymupdf
 tiktoken
+llama-index
+llama-index-graph-stores-neo4j
+llama-index-embeddings-huggingface
+llama-index-llms-ollama

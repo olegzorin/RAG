@@ -20,9 +20,11 @@ def get_property(key: str, default: str = None) -> str:
     return properties.get(f'ppc.ragagent.{key}', PropertyTuple(data=default, meta=None)).data
 
 
-def resolve_path(property_key: str, default_path: str) -> Path:
+def _resolve_path(property_key: str, default_path: str) -> Path:
     return Path(ppc_home, 'ragagent', get_property(property_key, default_path))
 
+model_cache_dir = _resolve_path('models.cacheDir', 'caches').as_posix()
+docs_cache_dir = _resolve_path("docs.cacheDir", "documents").as_posix()
 
 # Logging
 

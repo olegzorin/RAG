@@ -16,9 +16,9 @@ from camelot.utils import is_url, download_url
 from pandas import DataFrame
 from pydantic import BaseModel, TypeAdapter
 
-from conf import get_property, resolve_path
+from conf import get_property, docs_cache_dir
 
-DOCS_FOLDER = f'{resolve_path("documents.root", "documents")}'
+DOCS_FOLDER = docs_cache_dir
 WORK_FOLDER = Path(DOCS_FOLDER, 'temp')
 os.makedirs(WORK_FOLDER, exist_ok=True)
 
@@ -126,15 +126,17 @@ class ExtractedDoc(BaseModel):
                 table_rows.extend(_table.rows)
         return table_rows
 
+    def get_content(self) -> str:
+        texts = []
+        for page in self.pages:
+            texts.append(page.content)
+        return _reformat_paragraphs('\n'.join(texts))
+
     def split_into_chucks(
             self,
             chunkers: list[Any]
     ) -> list[str]:
-        texts = []
-        for page in self.pages:
-            texts.append(page.content)
-
-        text = _reformat_paragraphs('\n'.join(texts))
+        text = self.get_content()
         chunks = []
         for chunker in chunkers:
             _chunks = chunker.split_text(text)

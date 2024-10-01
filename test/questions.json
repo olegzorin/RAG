@@ -1,0 +1,78 @@
+[
+  {
+    "Key": "AGR_DATE",
+    "Value": "What is the effective date of the agreement?"
+  },
+  {
+    "Key": "AGR_TERM_MONTHS",
+    "Value": "What is the term of the agreement in months?"
+  },
+  {
+    "Key": "RNW_PERIOD",
+    "Value": "What is the autorenewal period in months?"
+  },
+  {
+    "Key": "TRM_DAYS",
+    "Value": "How many days notice is needed to terminate without cause?"
+  },
+  {
+    "Key": "CLM_SUB_DAYS",
+    "Value": "What is the claims submission period in days?"
+  },
+  {
+    "Key": "CLM_APP_DAYS",
+    "Value": "How many days does the provider have to appeal a claim?"
+  },
+  {
+    "Key": "CLM_TIMELINE",
+    "Value": "What is the claims payment timeline?"
+  },
+  {
+    "Key": "BIZ_LINES",
+    "Value": "What lines of business are included within the agreement?"
+  },
+  {
+    "Key": "RMB_STRUCT",
+    "Value": "What is the reimbursement structure?"
+  },
+  {
+    "Key": "PDPM_PERC",
+    "Value": "If PDPM (Medicare allowable), what percentage is paid per day?"
+  },
+  {
+    "Key": "PLAN_LEVELS_RATES",
+    "Value": "If leveled plan, what are the per diem rates for each level?"
+  },
+  {
+    "Key": "PLAN_LEVELS",
+    "Value": "If level plan, what levels are included and what is the name of each level?"
+  },
+  {
+    "Key": "PLAN_REV_CODES",
+    "Value": "If level plan, what are the revenue codes for each level?"
+  },
+  {
+    "Key": "SERV_LEVELS",
+    "Value": "Please list all included services for each level and provide the level definition."
+  },
+  {
+    "Key": "EXCLUSIONS",
+    "Value": "Are there any full contract exclusions?"
+  },
+  {
+    "Key": "HIGH_COSTS",
+    "Value": "Please list any high cost medication provisions found in the agreement."
+  },
+  {
+    "Key": "HIGH_COSTS_CLAIMS",
+    "Value": "Please list all necessary items needed for the claim for high cost medications to be reimbursed."
+  },
+  {
+    "Key": "FACILITIES",
+    "Value": "What facilities are included on the agreement?"
+  },
+  {
+    "Key": "CLM_ADDRESS",
+    "Value": "What is the claims submission address?"
+  }
+]

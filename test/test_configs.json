@@ -1,0 +1,75 @@
+{
+  "params": {
+    "search.type": "similarity",
+    "embeddings.use_gpu": "True",
+    "output.use_gpu": "False",
+    "ollama.temperature": "0.0",
+    "ollama.seed": "2",
+    "ollama.top_k": "10",
+    "ollama.top_p": "0.3",
+    "ollama.num_ctx": "4096",
+    "ollama.num_predict": "-2",
+    "tokenizer.max_length": "3900"
+  },
+  "tests": [
+    {
+      "id": 1,
+      "params": {
+        "search.method": "keywords",
+        "keybert.model": "all-MiniLM-L6-v2",
+        "embeddings.model": "all-MiniLM-L6-v2",
+        "ollama.model": "llama3.1"
+      }
+    },
+    {
+      "id": 2,
+      "params": {
+        "search.method": "keywords",
+        "keybert.model": "all-MiniLM-L6-v2",
+        "embeddings.model": "BAAI/bge-m3",
+        "ollama.model": "eas/dragon-yi-v0"
+      }
+    },
+    {
+      "id": 3,
+      "params": {
+        "search.method": "keywords",
+        "keybert.model": "BAAI/bge-m3",
+        "embeddings.model": "BAAI/bge-m3",
+        "ollama.model": "eas/dragon-yi-v0"
+      }
+    },
+    {
+      "id": 4,
+      "params": {
+        "search.method": "vector",
+        "embeddings.model": "all-MiniLM-L6-v2",
+        "ollama.model": "llama3.1"
+      }
+    },
+    {
+      "id": 5,
+      "params": {
+        "search.method": "vector",
+        "embeddings.model": "BAAI/bge-m3",
+        "ollama.model": "eas/dragon-yi-v0"
+      }
+    },
+    {
+      "id": 6,
+      "params": {
+        "search.method": "graph",
+        "embeddings.model": "all-MiniLM-L6-v2",
+        "ollama.model": "llama3.1"
+      }
+    },
+    {
+      "id": 7,
+      "params": {
+        "search.method": "graph",
+        "embeddings.model": "BAAI/bge-m3",
+        "ollama.model": "eas/dragon-yi-v0"
+      }
+    }
+  ]
+}

@@ -24,7 +24,7 @@ class KeywordSearch(RagSearch):
             params: Dict
     ) -> None:
         super().__init__(params)
-        self.kw_model = KeyBERT(model='all-MiniLM-L6-v2')
+        self.kw_model = KeyBERT(self.params.get('keybert.model', 'all-MiniLM-L6-v2'))
         logger.info('KeywordSearch!')
 
     def get_answers(

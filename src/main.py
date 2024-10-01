@@ -53,7 +53,8 @@ param_keys = [
     "ollama.num_predict",
     "output.model",
     "output.use_gpu",
-    "tokenizer.max_length"
+    "tokenizer.max_length",
+    "keybert.model"
 ]
 
 

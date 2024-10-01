@@ -13,11 +13,8 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables import RunnablePassthrough
 from langchain_experimental.text_splitter import SemanticChunker
 
-from conf import get_property, resolve_path
+from conf import get_property, model_cache_dir
 from reader import ExtractedDoc
-
-cache_folder = resolve_path('models.cacheDir', 'caches').as_posix()
-gpu_device = get_property('instance.gpuDevice', 'cpu')
 
 DEFAULT_EMBEDDINGS_MODEL = "BAAI/bge-m3"
 # DEFAULT_EMBEDDINGS_MODEL = "all-MiniLM-L6-v2"
@@ -100,7 +97,7 @@ class RagSearch(ABC):
             model_name=embeddings_model,
             model_kwargs=model_kwargs,
             encode_kwargs=encode_kwargs,
-            cache_folder=cache_folder
+            cache_folder=model_cache_dir
         )
 
         self.embeddings_dimension = len(self.embeddings_model.embed_query("foo"))
@@ -191,7 +188,7 @@ class RagSearch(ABC):
                 pretrained_model_name_or_path=model_name,
                 trust_remote_code=True,
                 torch_dtype=torch.bfloat16,
-                cache_dir=cache_folder
+                cache_dir=model_cache_dir
             )
             model.to(device)
             model.eval()
