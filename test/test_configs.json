@@ -11,12 +11,11 @@
     "ollama.num_predict": "-2",
     "tokenizer.max_length": "3900"
   },
-  "tests": [
+  "configs": [
     {
       "id": 1,
       "params": {
-        "search.method": "keywords",
-        "keybert.model": "all-MiniLM-L6-v2",
+        "search.method": "vector",
         "embeddings.model": "all-MiniLM-L6-v2",
         "ollama.model": "llama3.1"
       }
@@ -24,8 +23,7 @@
     {
       "id": 2,
       "params": {
-        "search.method": "keywords",
-        "keybert.model": "all-MiniLM-L6-v2",
+        "search.method": "vector",
         "embeddings.model": "BAAI/bge-m3",
         "ollama.model": "eas/dragon-yi-v0"
       }
@@ -33,40 +31,42 @@
     {
       "id": 3,
       "params": {
-        "search.method": "keywords",
-        "keybert.model": "BAAI/bge-m3",
-        "embeddings.model": "BAAI/bge-m3",
-        "ollama.model": "eas/dragon-yi-v0"
+        "search.method": "graph",
+        "embeddings.model": "all-MiniLM-L6-v2",
+        "ollama.model": "llama3.1"
       }
     },
     {
       "id": 4,
       "params": {
-        "search.method": "vector",
-        "embeddings.model": "all-MiniLM-L6-v2",
-        "ollama.model": "llama3.1"
-      }
-    },
-    {
-      "id": 5,
-      "params": {
-        "search.method": "vector",
+        "search.method": "graph",
         "embeddings.model": "BAAI/bge-m3",
         "ollama.model": "eas/dragon-yi-v0"
       }
     },
     {
-      "id": 6,
+      "id": 5,
       "params": {
-        "search.method": "graph",
+        "search.method": "keywords",
+        "keybert.model": "all-MiniLM-L6-v2",
         "embeddings.model": "all-MiniLM-L6-v2",
         "ollama.model": "llama3.1"
       }
     },
     {
+      "id": 6,
+      "params": {
+        "search.method": "keywords",
+        "keybert.model": "all-MiniLM-L6-v2",
+        "embeddings.model": "BAAI/bge-m3",
+        "ollama.model": "eas/dragon-yi-v0"
+      }
+    },
+    {
       "id": 7,
       "params": {
-        "search.method": "graph",
+        "search.method": "keywords",
+        "keybert.model": "BAAI/bge-m3",
         "embeddings.model": "BAAI/bge-m3",
         "ollama.model": "eas/dragon-yi-v0"
       }

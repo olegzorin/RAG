@@ -70,6 +70,31 @@ def _get_rag_search(params: Dict) -> RagSearch:
         raise AttributeError(f"Invalid search method {search_method}")
 
 
+def process_request(
+        request: ActionRequest,
+        response: ActionResponse
+) -> None:
+    document: ExtractedDoc = reader.read_pdf(
+        document_id=request.documentId,
+        source=request.url
+    )
+
+    start_time = time.time_ns()
+
+    if request.questions:
+        rag_search: RagSearch = _get_rag_search(request.params)
+        answers = rag_search.get_answers(document, request.questions)
+        template = _get_non_empty_or_none(request.template)
+        examples = _get_non_empty_or_none(request.examples)
+        if template is not None or examples is not None:
+            response.outputs = rag_search.generate_outputs(texts=answers, template=template, examples=examples)
+
+        response.answers = answers
+
+    response.executionTime = (time.time_ns() - start_time) // 1000_000
+    response.success = True
+
+
 def run(data: str, outpath: Optional[str] = None):
     response = ActionResponse()
 
@@ -84,25 +109,7 @@ def run(data: str, outpath: Optional[str] = None):
                 if not k in param_keys:
                     raise KeyError(f"Invalid param key: {k}")
 
-            document: ExtractedDoc = reader.read_pdf(
-                document_id=request.documentId,
-                source=request.url
-            )
-
-            start_time = time.time_ns()
-
-            if request.questions:
-                rag_search: RagSearch = _get_rag_search(request.params)
-                answers = rag_search.get_answers(document, request.questions)
-                template = _get_non_empty_or_none(request.template)
-                examples = _get_non_empty_or_none(request.examples)
-                if template is not None or examples is not None:
-                    response.outputs = rag_search.generate_outputs(texts=answers, template=template, examples=examples)
-
-                response.answers = answers
-
-            response.executionTime = (time.time_ns() - start_time) // 1000_000
-            response.success = True
+            process_request(request, response)
 
         except ValidationError as ve:
             response.errorMessage = f'Wrong action input, {ve}'
