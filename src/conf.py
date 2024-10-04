@@ -23,8 +23,9 @@ def get_property(key: str, default: str = None) -> str:
 def _resolve_path(property_key: str, default_path: str) -> Path:
     return Path(ppc_home, 'ragagent', get_property(property_key, default_path))
 
-model_cache_dir = _resolve_path('models.cacheDir', 'caches').as_posix()
 docs_cache_dir = _resolve_path("docs.cacheDir", "documents").as_posix()
+model_cache_dir = _resolve_path('models.cacheDir', 'caches').as_posix()
+model_source_dir = _resolve_path('models.sourceDir', 'models').as_posix()
 
 # Logging
 

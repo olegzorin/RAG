@@ -1,20 +1,26 @@
 import logging
 import shutil
+from pathlib import Path
 
 import reader
-from main import ActionResponse, ActionRequest, process_request
-from test_utils import test_configs, questions, TestResult, DOCS_DIR
+from main import ActionResponse, ActionRequest, process_rag_request
+from test_utils import test_configs, questions, TestResult, DOCS_DIR, doc_names
 
 logging.basicConfig(
     level=logging.INFO,
     force=True
 )
 
-doc_names = ['CCR']  # , 'LHS', 'MHR']
+chunk_sizes = ['1000', '500', '250']
 
 for doc_name in doc_names:
     doc_path = f'{DOCS_DIR}/{doc_name}.pdf'
     results_path = f'{DOCS_DIR}/{doc_name}.results'
+
+    if Path(results_path).exists():
+        print(f"{results_path} already exists")
+        continue
+
     open(results_path, 'w').write('')
 
     document_id = 1
@@ -23,10 +29,8 @@ for doc_name in doc_names:
         dst=f'{reader.DOCS_FOLDER}/{document_id}.json'
     )
 
-    chunk_sizes = ['1000', '500', '250']
-
-    for conf in test_configs.configs[0:2]:
-        for chunk_size in chunk_sizes[0:2]:
+    for conf in test_configs.configs:
+        for chunk_size in chunk_sizes:
             request = ActionRequest(
                 documentId=document_id,
                 url=doc_path,
@@ -38,7 +42,7 @@ for doc_name in doc_names:
                 }
             )
             response = ActionResponse()
-            process_request(request, response)
+            process_rag_request(request, response)
 
             result = TestResult(
                 doc_name=doc_name,

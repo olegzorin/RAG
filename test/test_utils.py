@@ -4,8 +4,15 @@ from pydantic import BaseModel, TypeAdapter
 
 DOCS_DIR = '../docs'
 
+doc_names = [
+    # 'CCR',
+    'LHS'
+    # 'MHR'
+]
+
+
 class TestConf(BaseModel):
-    id: int
+    id: str
     params: dict[str, str]
 
 
@@ -27,7 +34,7 @@ questions: List[Question] = TypeAdapter(List[Question]).validate_json(open('ques
 
 class TestResult(BaseModel):
     doc_name: str
-    conf_id: int
+    conf_id: str
     chunk_size: int
     answers: list[str]
 

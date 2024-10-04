@@ -8,13 +8,7 @@ from typing import List, Optional, Dict, Any
 
 from pydantic import TypeAdapter, ValidationError, BaseModel
 
-import reader
-from conf import set_logging
-from core import RagSearch
-from graph import GraphSearch
-from keywords import KeywordSearch
-from reader import ExtractedDoc
-from vector import VectorSearch
+from conf import set_logging, model_source_dir, model_cache_dir
 
 set_logging()
 
@@ -26,6 +20,7 @@ class ActionRequest(BaseModel):
     template: Optional[Any] = None
     examples: Optional[List[Any]] = None
     params: Optional[Dict] = {}
+    phrases: Optional[List[str]] = None
 
 
 class ActionResponse(BaseModel):
@@ -34,6 +29,7 @@ class ActionResponse(BaseModel):
     outputs: List[Any] = None
     errorMessage: str = None
     executionTime: int = 0
+    scores: List[list[float]] = None
 
 
 param_keys = [
@@ -58,7 +54,10 @@ param_keys = [
 ]
 
 
-def _get_rag_search(params: Dict) -> RagSearch:
+def _get_rag_search(params: Dict) -> Any:
+    from graph import GraphSearch
+    from keywords import KeywordSearch
+    from vector import VectorSearch
     search_method = params.get("search.method", "vector")
     if search_method == 'vector':
         return VectorSearch(params)
@@ -70,11 +69,15 @@ def _get_rag_search(params: Dict) -> RagSearch:
         raise AttributeError(f"Invalid search method {search_method}")
 
 
-def process_request(
+def process_rag_request(
         request: ActionRequest,
         response: ActionResponse
 ) -> None:
-    document: ExtractedDoc = reader.read_pdf(
+    from core import RagSearch
+    from reader import ExtractedDoc
+    from reader import read_pdf
+
+    document: ExtractedDoc = read_pdf(
         document_id=request.documentId,
         source=request.url
     )
@@ -95,6 +98,31 @@ def process_request(
     response.success = True
 
 
+def process_setfit_request(
+        request: ActionRequest,
+        response: ActionResponse
+) -> None:
+    import warnings
+    from setfit import SetFitModel
+
+    warnings.filterwarnings(
+        action="ignore",
+        category=UserWarning
+    )
+
+    model = SetFitModel.from_pretrained(
+        pretrained_model_name_or_path=f'{model_source_dir}/setfit',
+        cache_dir=model_cache_dir,
+        local_files_only=True
+    )
+    res = model.predict_proba(
+        inputs=request.phrases,
+        as_numpy=True
+    )
+    response.scores = [list(score) for score in res]
+    response.success = True
+
+
 def run(data: str, outpath: Optional[str] = None):
     response = ActionResponse()
 
@@ -105,11 +133,14 @@ def run(data: str, outpath: Optional[str] = None):
             decoded = base64.b64decode(data)
             request = TypeAdapter(ActionRequest).validate_json(decoded)
 
-            for k in request.params.keys():
-                if not k in param_keys:
-                    raise KeyError(f"Invalid param key: {k}")
+            if request.phrases:
+                process_setfit_request(request, response)
 
-            process_request(request, response)
+            else:
+                for k in request.params.keys():
+                    if not k in param_keys:
+                        raise KeyError(f"Invalid param key: {k}")
+                process_rag_request(request, response)
 
         except ValidationError as ve:
             response.errorMessage = f'Wrong action input, {ve}'
