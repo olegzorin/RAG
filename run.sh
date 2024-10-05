@@ -2,6 +2,8 @@
 
 export PPC_HOME=${PPC_HOME:-/opt/greenxserver}
 
+cd /Users/oleg/Projects/PPC-RAG/
+
 source .venv/bin/activate
 
 outfile=$(mktemp)

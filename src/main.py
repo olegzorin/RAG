@@ -8,28 +8,26 @@ from typing import List, Optional, Dict, Any
 
 from pydantic import TypeAdapter, ValidationError, BaseModel
 
-from conf import set_logging, model_source_dir, model_cache_dir
+from conf import set_logging
 
 set_logging()
 
 
-class ActionRequest(BaseModel):
+class RagRequest(BaseModel):
     documentId: int
     url: str
     questions: Optional[List[str]] = None
     template: Optional[Any] = None
     examples: Optional[List[Any]] = None
     params: Optional[Dict] = {}
-    phrases: Optional[List[str]] = None
 
 
-class ActionResponse(BaseModel):
+class RagResponse(BaseModel):
     success: bool = False
     answers: List[str] = None
     outputs: List[Any] = None
     errorMessage: str = None
     executionTime: int = 0
-    scores: List[list[float]] = None
 
 
 param_keys = [
@@ -55,23 +53,23 @@ param_keys = [
 
 
 def _get_rag_search(params: Dict) -> Any:
-    from graph import GraphSearch
-    from keywords import KeywordSearch
-    from vector import VectorSearch
     search_method = params.get("search.method", "vector")
     if search_method == 'vector':
+        from vector import VectorSearch
         return VectorSearch(params)
     elif search_method == 'graph':
+        from graph import GraphSearch
         return GraphSearch(params)
     elif search_method == 'keywords':
+        from keywords import KeywordSearch
         return KeywordSearch(params)
     else:
         raise AttributeError(f"Invalid search method {search_method}")
 
 
 def process_rag_request(
-        request: ActionRequest,
-        response: ActionResponse
+        request: RagRequest,
+        response: RagResponse
 ) -> None:
     from core import RagSearch
     from reader import ExtractedDoc
@@ -87,60 +85,38 @@ def process_rag_request(
     if request.questions:
         rag_search: RagSearch = _get_rag_search(request.params)
         answers = rag_search.get_answers(document, request.questions)
+
         template = _get_non_empty_or_none(request.template)
         examples = _get_non_empty_or_none(request.examples)
         if template is not None or examples is not None:
-            response.outputs = rag_search.generate_outputs(texts=answers, template=template, examples=examples)
-
+            response.outputs = rag_search.generate_outputs(
+                texts=answers,
+                template=template,
+                examples=examples
+            )
         response.answers = answers
 
     response.executionTime = (time.time_ns() - start_time) // 1000_000
     response.success = True
 
 
-def process_setfit_request(
-        request: ActionRequest,
-        response: ActionResponse
+def run(
+        data: str,
+        outpath: Optional[str] = None
 ) -> None:
-    import warnings
-    from setfit import SetFitModel
-
-    warnings.filterwarnings(
-        action="ignore",
-        category=UserWarning
-    )
-
-    model = SetFitModel.from_pretrained(
-        pretrained_model_name_or_path=f'{model_source_dir}/setfit',
-        cache_dir=model_cache_dir,
-        local_files_only=True
-    )
-    res = model.predict_proba(
-        inputs=request.phrases,
-        as_numpy=True
-    )
-    response.scores = [list(score) for score in res]
-    response.success = True
-
-
-def run(data: str, outpath: Optional[str] = None):
-    response = ActionResponse()
+    response = RagResponse()
 
     if not data:
         response.errorMessage = 'No input'
     else:
         try:
             decoded = base64.b64decode(data)
-            request = TypeAdapter(ActionRequest).validate_json(decoded)
+            request = TypeAdapter(RagRequest).validate_json(decoded)
 
-            if request.phrases:
-                process_setfit_request(request, response)
-
-            else:
-                for k in request.params.keys():
-                    if not k in param_keys:
-                        raise KeyError(f"Invalid param key: {k}")
-                process_rag_request(request, response)
+            for k in request.params.keys():
+                if not k in param_keys:
+                    raise KeyError(f"Invalid param key: {k}")
+            process_rag_request(request, response)
 
         except ValidationError as ve:
             response.errorMessage = f'Wrong action input, {ve}'
@@ -152,7 +128,7 @@ def run(data: str, outpath: Optional[str] = None):
             logging.exception(e)
             response.errorMessage = 'Unexpected exception'
 
-        result = TypeAdapter(ActionResponse).dump_json(response, exclude_none=True)
+        result = TypeAdapter(RagResponse).dump_json(response, exclude_none=True)
 
         if outpath is not None:
             with open(outpath, 'wb') as outfile:

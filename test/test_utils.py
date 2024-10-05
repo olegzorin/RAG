@@ -6,8 +6,8 @@ DOCS_DIR = '../docs'
 
 doc_names = [
     # 'CCR',
-    'LHS'
-    # 'MHR'
+    # 'LHS'
+    'MHR'
 ]
 
 
