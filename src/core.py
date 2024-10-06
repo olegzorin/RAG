@@ -170,9 +170,15 @@ class RagSearch(ABC):
     def generate_outputs(
             self,
             texts: List[str],
-            template: Any,
-            examples: List[Any]
+            template: Optional[str] = None,
+            examples: List[str] = None
     ) -> List[Any]:
+
+        str_template = json.dumps(template, indent=4) if template else None
+        str_examples = [json.dumps(example, indent=4) for example in examples if
+                        example is not None] if examples else None
+        if not str_template and not str_examples:
+            return None
 
         device = self._get_computing_device("output.use_gpu", True)
         logger.info(f"Output computing device: {device}")
@@ -200,12 +206,12 @@ class RagSearch(ABC):
             model.generation_config.pad_token_id = tokenizer.eos_token_id
 
             input_llm: list[str] = ["<|input|>"]
-            if template is not None:
-                input_llm.extend(["### Template:", json.dumps(template, indent=4)])
+            if str_template is not None:
+                input_llm.extend(["### Template:", str_template])
 
-            if examples is not None:
-                for example in examples:
-                    input_llm.extend(["### Example:", json.dumps(example, indent=4)])
+            if str_examples is not None:
+                for str_example in str_examples:
+                    input_llm.extend(["### Example:", str_example])
 
             input_llm.extend(["### Text:", "...", "<|output|>", ""])
 

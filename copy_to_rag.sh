@@ -9,6 +9,7 @@ pushd src || exit 1
 /Users/oleg/Projects/PPC/util/scp-to.sh rag graph.py
 /Users/oleg/Projects/PPC/util/scp-to.sh rag db.py
 /Users/oleg/Projects/PPC/util/scp-to.sh rag reader.py
-/Users/oleg/Projects/PPC/util/scp-to.sh rag keywords.py
+/Users/oleg/Projects/PPC/util/scp-to.sh rag run_rag.py
+/Users/oleg/Projects/PPC/util/scp-to.sh rag run_setfit.py
 
 popd || exit
