@@ -5,8 +5,8 @@ from pydantic import BaseModel, TypeAdapter
 DOCS_DIR = '../docs'
 
 doc_names = [
-    # 'CCR',
-    # 'LHS'
+    'CCR',
+    'LHS',
     'MHR'
 ]
 
