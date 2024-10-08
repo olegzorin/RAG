@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 
 document_id = 1
-document_name = 'CCR 1'
+document_name = 'CCR'
 
 shutil.copy(f'../docs/{document_name}.json', f'{reader.DOCS_FOLDER}/{document_id}.json')
 
