@@ -3,7 +3,7 @@ import shutil
 from pathlib import Path
 
 import reader
-from main import ActionResponse, ActionRequest, process_rag_request
+from run_rag import RagResponse, RagRequest, RagExecutor
 from test_utils import test_configs, questions, TestResult, DOCS_DIR, doc_names
 
 logging.basicConfig(
@@ -17,11 +17,8 @@ for doc_name in doc_names:
     doc_path = f'{DOCS_DIR}/{doc_name}.pdf'
     results_path = f'{DOCS_DIR}/{doc_name}.results'
 
-    if Path(results_path).exists():
-        print(f"{results_path} already exists")
-        continue
-
-    open(results_path, 'w').write('')
+    if not Path(results_path).exists():
+        open(results_path, 'w').write('')
 
     document_id = 1
     shutil.copy(
@@ -30,8 +27,10 @@ for doc_name in doc_names:
     )
 
     for conf in test_configs.configs:
+        if conf.id != 'v4':
+            continue
         for chunk_size in chunk_sizes:
-            request = ActionRequest(
+            request = RagRequest(
                 documentId=document_id,
                 url=doc_path,
                 questions=[question.Value for question in questions],
@@ -41,8 +40,8 @@ for doc_name in doc_names:
                     "reader.chunk_size": chunk_size
                 }
             )
-            response = ActionResponse()
-            process_rag_request(request, response)
+            response = RagResponse()
+            RagExecutor().execute(request, response)
 
             result = TestResult(
                 doc_name=doc_name,

@@ -1,11 +1,14 @@
-import sys
+import shutil
 
 import nest_asyncio
 from llama_index.core import PropertyGraphIndex
-from llama_index.core import SimpleDirectoryReader
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
+
+import re
+import reader
 from conf import model_cache_dir, get_property
+from reader import ExtractedDoc
 
 nest_asyncio.apply()
 
@@ -182,8 +185,6 @@ kg_extractor = DynamicLLMPathExtractor(
     allowed_relation_types=relations_names,
 )
 
-documents = SimpleDirectoryReader("./data/").load_data()
-
 graph_store = Neo4jPropertyGraphStore(
     url=get_property('neo4j.url'),
     password=get_property('neo4j.password'),
@@ -202,9 +203,22 @@ embed_model = HuggingFaceEmbedding(
 from llama_index.core.node_parser import SemanticSplitterNodeParser
 
 splitter = SemanticSplitterNodeParser(
-    buffer_size=1, breakpoint_percentile_threshold=95, embed_model=embed_model
+    buffer_size=1,
+    breakpoint_percentile_threshold=95,
+    embed_model=embed_model
 )
-nodes = splitter.get_nodes_from_documents(documents)
+
+document_id = 1
+shutil.copy(
+    src='../docs/CCR.json',
+    dst=f'{reader.DOCS_FOLDER}/{document_id}.json'
+)
+
+from llama_index.core.schema import Document
+
+document = Document(text=ExtractedDoc.load(document_id=document_id).get_content())
+
+nodes = splitter.get_nodes_from_documents([document])
 
 index = PropertyGraphIndex(
     nodes,
@@ -218,22 +232,13 @@ index = PropertyGraphIndex(
 # Close the neo4j connection explicitly.
 graph_store.close()
 
-
 ################
-
 
 
 from llama_index.core.indices.property_graph import VectorContextRetriever
 
-from ..konsman.llm_custom_synonym import LLMCustomSynonymRetriever
-from llama_index.core import PropertyGraphIndex
+from llm_custom_synonym import LLMCustomSynonymRetriever
 from llama_index.llms.ollama import Ollama
-
-index = PropertyGraphIndex.from_existing(
-    property_graph_store=graph_store,
-    llm=llm,
-    embed_model=embed_model,
-)
 
 prompt = (
     "Given some initial query, generate synonyms or related keywords up to {max_keywords} in total, "
@@ -245,8 +250,6 @@ prompt = (
     "----\n"
     "KEYWORDS: "
 )
-
-import re
 
 
 def parse_fn(llm_output: str) -> list:
@@ -400,3 +403,11 @@ print("final outputs =", outputs)
 
 # Close the neo4j connection explicitly.
 graph_store.close()
+
+
+'''
+llm_output =  if_leveled_plan^per_diem^rates^for_each_level^per_level^payment^wage^compensation^rate^remuneration^salary^stipend^wages^hourly_rate^daily_rate
+keywords_list= ['IF_LEVELED_PLAN', 'PER_DIEM', 'RATES', 'FOR_EACH_LEVEL', 'PER_LEVEL', 'PAYMENT', 'WAGE', 'COMPENSATION', 'RATE', 'REMUNERATION', 'SALARY', 'STIPEND', 'WAGES', 'HOURLY_RATE', 'DAILY_RATE']
+final outputs = {'What is the effective date of the agreement?': 'Not Found.', 'How many days notice is needed to terminate without cause?': 'Not Found', 'What is the claims submission period in days?': 'Not Found.', 'What is the claims payment timeline?': 'Not Found.', 'What lines of business are included within the agreement?': 'This Agreement shall apply only to Health Care Services provided by Provider, pursuant to this agreement between ChoiceCare and Provider.', 'What is the reimbursement structure?': "It depends on whether ChoiceCare has authorized a specific service per Humana's Provider Manual or its successor manual.", 'If leveled plan, what are the per diem rates for each level?': 'Not Found.'}
+
+'''

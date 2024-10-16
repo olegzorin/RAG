@@ -37,6 +37,14 @@
       }
     },
     {
+      "id": "v4",
+      "params": {
+        "search.method": "vector",
+        "embeddings.model": "BAAI/bge-m3",
+        "ollama.model": "mistral:7b-instruct-v0.3-q2_K"
+      }
+    },
+    {
       "id": "g1",
       "params": {
         "search.method": "graph",

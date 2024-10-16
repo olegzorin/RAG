@@ -262,7 +262,7 @@ def _extract_page_from_image(
     )
     try:
         img = Image.open(img_path)
-        img = img.crop((0, PDF_HEADER_OFFSET, img.width, img.height - PDF_FOOTER_OFFSET))
+        # img = img.crop((0, PDF_HEADER_OFFSET, img.width, img.height - PDF_FOOTER_OFFSET))
         text: str = pytesseract.image_to_string(
             image=img,
             config=TESSERACT_CONFIG

@@ -49,8 +49,8 @@ class VectorSearch(RagSearch):
                 SemanticSplitter(
                     embeddings=self.embeddings_model,
                     chunk_size=chunk_size
-                ),
-                ParagraphSplitter()
+                )#,
+                # ParagraphSplitter()
             ]
         )
 
