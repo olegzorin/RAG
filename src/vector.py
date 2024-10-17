@@ -6,7 +6,7 @@ from langchain.retrievers import EnsembleRetriever
 
 from core import RagSearch, SemanticSplitter, ParagraphSplitter
 from db import Neo4jDB
-from reader import ExtractedDoc
+from reader import PdfDoc
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -38,7 +38,7 @@ class VectorSearch(RagSearch):
 
     def get_answers(
             self,
-            document: ExtractedDoc,
+            document: PdfDoc,
             questions: list[str]
     ) -> list[str]:
 

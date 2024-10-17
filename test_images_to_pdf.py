@@ -18,7 +18,7 @@ from camelot.utils import is_url, download_url
 from pandas import DataFrame
 from pydantic import BaseModel, TypeAdapter
 
-from conf import get_property, docs_cache_dir
+from conf import get_property, DOCS_CACHE_DIR
 
 source = 'docs/CCR.pdf'
 

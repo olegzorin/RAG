@@ -10,7 +10,7 @@ from langchain_core.documents import Document
 
 from core import RagSearch, SemanticSplitter
 from db import Neo4jDB
-from reader import ExtractedDoc
+from reader import PdfDoc
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -29,7 +29,7 @@ class KeywordSearch(RagSearch):
 
     def get_answers(
             self,
-            document: ExtractedDoc,
+            document: PdfDoc,
             questions: list[str]
     ) -> list[str]:
         def preprocessing_upper_func(

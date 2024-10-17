@@ -5,7 +5,7 @@ import shutil
 from ragatouille import RAGPretrainedModel
 
 import reader
-from reader import ExtractedDoc
+from reader import PdfDoc
 
 os.environ['CC'] = '/usr/bin/gcc'
 os.environ['CXX'] = '/usr/bin/g++'
@@ -49,7 +49,7 @@ questions = {
     'CLM_ADDRESS': "What is the claims submission address?"
 }
 
-doc: ExtractedDoc = reader.read_pdf(
+doc: PdfDoc = reader.read_pdf(
     document_id=document_id,
     source=f'../docs/{document_name}.pdf'
 )

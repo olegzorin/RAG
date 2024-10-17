@@ -13,8 +13,8 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables import RunnablePassthrough
 from langchain_experimental.text_splitter import SemanticChunker
 
-from conf import get_property, model_cache_dir
-from reader import ExtractedDoc
+from conf import get_property, MODEL_CACHE_DIR
+from reader import PdfDoc
 
 DEFAULT_EMBEDDINGS_MODEL = "BAAI/bge-m3"
 # DEFAULT_EMBEDDINGS_MODEL = "all-MiniLM-L6-v2"
@@ -97,7 +97,7 @@ class RagSearch(ABC):
             model_name=embeddings_model,
             model_kwargs=model_kwargs,
             encode_kwargs=encode_kwargs,
-            cache_folder=model_cache_dir
+            cache_folder=MODEL_CACHE_DIR
         )
 
         self.embeddings_dimension = len(self.embeddings_model.embed_query("foo"))
@@ -123,7 +123,7 @@ class RagSearch(ABC):
     @abstractmethod
     def get_answers(
             self,
-            document: ExtractedDoc,
+            document: PdfDoc,
             questions: list[str]
     ) -> list[str]:
         pass
@@ -194,7 +194,7 @@ class RagSearch(ABC):
                 pretrained_model_name_or_path=model_name,
                 trust_remote_code=True,
                 torch_dtype=torch.bfloat16,
-                cache_dir=model_cache_dir
+                cache_dir=MODEL_CACHE_DIR
             )
             model.to(device)
             model.eval()

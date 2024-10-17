@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pymupdf4llm
 
-from reader import ExtractedDoc, ExtractedPage
+from reader import PdfDoc, ExtractedPage
 from vector import VectorSearch
 
 pdf_path = 'docs/CCR.pdf'
@@ -32,7 +32,7 @@ vector = VectorSearch(
     }
 )
 
-doc = ExtractedDoc(
+doc = PdfDoc(
     id=1,
     checksum='123',
     pages=[

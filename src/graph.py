@@ -12,7 +12,7 @@ from neo4j.exceptions import DatabaseError, ClientError
 
 import conf
 from core import RagSearch, SemanticSplitter, ParagraphSplitter
-from reader import ExtractedDoc
+from reader import PdfDoc
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +111,7 @@ class GraphSearch(RagSearch):
 
     def get_answers(
             self,
-            document: ExtractedDoc,
+            document: PdfDoc,
             questions: list[str]
     ) -> list[str]:
 

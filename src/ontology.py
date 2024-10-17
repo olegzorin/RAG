@@ -7,8 +7,8 @@ from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
 
 import re
 import reader
-from conf import model_cache_dir, get_property
-from reader import ExtractedDoc
+from conf import MODEL_CACHE_DIR, get_property
+from reader import PdfDoc
 
 nest_asyncio.apply()
 
@@ -196,7 +196,7 @@ vec_store = None
 embed_model = HuggingFaceEmbedding(
     model_name="BAAI/bge-m3",
     device='mps',
-    cache_folder=model_cache_dir  # device='cuda')
+    cache_folder=MODEL_CACHE_DIR  # device='cuda')
 )
 
 #########
@@ -216,7 +216,7 @@ shutil.copy(
 
 from llama_index.core.schema import Document
 
-document = Document(text=ExtractedDoc.load(document_id=document_id).get_content())
+document = Document(text=PdfDoc.load(document_id=document_id).get_content())
 
 nodes = splitter.get_nodes_from_documents([document])
 

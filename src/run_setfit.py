@@ -4,7 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from setfit import SetFitModel
 
-from conf import set_logging, model_source_dir, model_cache_dir
+from conf import set_logging, MODEL_SOURCE_DIR, MODEL_CACHE_DIR
 from main import Response, Executor
 
 set_logging()
@@ -30,8 +30,8 @@ class SetFitExecutor(Executor):
             response: SetFitResponse
     ) -> None:
         model = SetFitModel.from_pretrained(
-            pretrained_model_name_or_path=f'{model_source_dir}/setfit',
-            cache_dir=model_cache_dir,
+            pretrained_model_name_or_path=f'{MODEL_SOURCE_DIR}/setfit',
+            cache_dir=MODEL_CACHE_DIR,
             local_files_only=True
         )
 

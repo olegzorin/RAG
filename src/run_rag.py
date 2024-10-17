@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from conf import set_logging
 from core import RagSearch
 from main import Response, Executor
-from reader import ExtractedDoc, read_pdf
+from reader import PdfDoc, read_pdf
 
 set_logging()
 
@@ -70,7 +70,7 @@ class RagExecutor(Executor):
             request: RagRequest,
             response: RagResponse
     ) -> None:
-        document: ExtractedDoc = read_pdf(
+        document: PdfDoc = read_pdf(
             document_id=request.documentId,
             source=request.url
         )
