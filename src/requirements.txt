@@ -17,8 +17,6 @@ pdf2image
 img2table
 pytesseract
 chromadb
-rank_bm25
-pysqlite3-binary
 pymupdf
 tiktoken
 llama-index

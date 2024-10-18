@@ -1,3 +1,5 @@
+from pydantic import BaseModel
+from re import match
 
 def reformat_paragraphs(
         text: str,
@@ -61,3 +63,6 @@ def reformat_paragraphs(
     for par in pars:
         lines.extend([*par.lines, ''])
     return '\n'.join(lines[:-1])
+
+def table_to_text(cells: list[list[str]]):
+    pass

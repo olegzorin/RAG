@@ -3,16 +3,15 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Union, Any
-
-import PyPDF2
-import pdf2image
+from typing import Union, Any, Optional
 
 import camelot
-import pytesseract
+from camelot.core import TableList, Table
+import pdf2image
 from PIL import Image
-from camelot.core import TableList
-from pydantic import BaseModel, TypeAdapter
+import PyPDF2
+import pytesseract
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 import text_utils
 from conf import DOCS_CACHE_DIR, get_property
@@ -39,14 +38,14 @@ def delete_file(
 class TextBlock(BaseModel):
     cols: int
     rows: int
-    cells: list[list[str]]
+    data: list[list[str]]
 
     def get_content_len(self) -> int:
-        return sum([sum([len(col) for col in row]) for row in self.cells])
+        return sum([sum([len(col) for col in row]) for row in self.data])
 
     @classmethod
     def from_text(cls, text: str) -> TextBlock:
-        return TextBlock(cols=1, rows=1, cells=[[text]])
+        return TextBlock(cols=1, rows=1, data=[[text]])
 
 
 class PdfPage(BaseModel):
@@ -69,9 +68,20 @@ class PdfPage(BaseModel):
             )
         )
 
-        def _extract_text(image: Image) -> str:
+        def _extract_text(
+                image: Image,
+                box: Optional[tuple[float, float, float, float]] = None,
+                rotated: bool = False
+        ) -> str:
+            im: Image = image.copy()
+            if rotated:
+                im = im.crop(box=(box[1], box[0], box[3], box[2]))
+                im = im.rotate(angle=90, expand=1)
+            else:
+                im = im.crop(box=(box[0], box[1], box[2], box[3]))
+
             return pytesseract.image_to_string(
-                image=image,
+                image=im.crop(box=(2, 0, im.width - 2, im.height)),
                 config='--psm 6'
             )
 
@@ -83,12 +93,15 @@ class PdfPage(BaseModel):
             resolution=DPI
         )
 
-        if table_list.n == 0:
+        if table_list is None or table_list.n == 0:
             if text := _extract_text(img):
                 self.contents.append(TextBlock.from_text(text))
+            logger.info(f"Found no tables")
+            delete_file(pdf_path)
             return
 
         # Start processing page with tables
+        logger.info(f"Found {table_list.n} tables")
 
         # Convertion of PDF coordinate system to pixels
         pdf = PyPDF2.PdfReader(pdf_path)
@@ -99,7 +112,14 @@ class PdfPage(BaseModel):
         # Vertical position of the top of the text
         text_v_top = 0
 
-        for table in table_list:
+        # There are pages with a horizontally arranged set of tables,
+        # each of which is rotated 90 degrees.
+        # Sort the tables by vertical top position to properly extract
+        # preceding plain text if any.
+        tables = list(table_list)
+        tables.sort(key=lambda t: t.rows[0][0], reverse=True)
+
+        for table in tables:
             # Absolute cordinates (start position and end positions) of the rows and columns in pixels
             rows = [(img.height - v_scale * r[0], img.height - v_scale * r[1]) for r in table.rows]
             cols = [(h_scale * c[0], h_scale * c[1]) for c in table.cols]
@@ -109,24 +129,30 @@ class PdfPage(BaseModel):
             table_v_btm = rows[-1][1]
 
             # Read text preceding the table, if any
-            if text := _extract_text(img.crop((0, text_v_top, img.width, table_v_top))):
+            if (text_v_top < table_v_top) and (text := _extract_text(image=img, box=(0, text_v_top, img.width, table_v_top))):
                 self.contents.append(TextBlock.from_text(text))
 
-            text_v_top = table_v_btm
+            text_v_top = max(table_v_btm, text_v_top)
 
             # Read table cells
+            avg_col_width = (cols[-1][1] - cols[0][0]) / len(cols)
+            is_vertical_table = avg_col_width < 30
+            if is_vertical_table:
+                rows, cols = cols, rows
+                rows.reverse()
+
             self.contents.append(
                 TextBlock(
-                    cols=len(table.cols),
-                    rows=len(table.rows),
-                    cells=[[
-                        _extract_text(img.crop((col[0], row[0], col[1], row[1])))
+                    cols=len(cols),
+                    rows=len(rows),
+                    data=[[
+                        _extract_text(image=img, box=(col[0], row[0], col[1], row[1]), rotated=is_vertical_table)
                         for col in cols
                     ] for row in rows]
                 )
             )
 
-        if text := _extract_text(img.crop((0, text_v_top, img.width, img.height))):
+        if text := _extract_text(image=img, box=(0, text_v_top, img.width, img.height)):
             self.contents.append(TextBlock.from_text(text))
 
 
@@ -158,22 +184,21 @@ class PdfDoc(BaseModel):
             first_page=first_page,
             last_page=last_page,
             output_folder=temp_folder,
+            fmt='png',
             paths_only=True,
             dpi=DPI
         )
         try:
             for i, path in enumerate(img_paths, 1):
+                logger.info(f"Read page {i}")
                 page = PdfPage(page_no=i)
                 page.load_from_image(path)
                 self.pages.append(page)
         finally:
             for path in img_paths:
                 delete_file(path)
-                delete_file(Path(path).with_suffix(".pdf"))
 
-    def dump(
-            self
-    ) -> str:
+    def dump(self) -> str:
         outputs: list[str] = []
         for page in self.pages:
             outputs.append(f'<------ Page {page.page_no} ------>')
@@ -251,8 +276,8 @@ class PdfFile(PdfDoc):
                     doc = TypeAdapter(PdfFile).validate_json(doc_path.read_bytes())
                     if doc.checksum == checksum:
                         return doc
-                except Exception as e:
-                    logger.warning(f"Exception reading document ID={document_id}: {e}")
+                except ValidationError:
+                    logger.warning(f"Exception reading cached document ID={document_id}")
 
             doc = PdfFile(checksum=checksum)
             doc.load_from_source(
@@ -274,3 +299,19 @@ class PdfFile(PdfDoc):
                 delete_file(source)
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    force=True
+)
+# name = 'CCR'
+name = 'LHS'
+document_id = 1
+page_no = 45
+
+PdfFile.read_doc(document_id=document_id, source=f'../docs/{name}.pdf', no_cache=True, first_page=page_no,
+                 last_page=page_no)
+# json_file = f'../docs/{name}.json'
+# delete_file(json_file)
+# import shutil
+#
+# shutil.copy(f'{DOCS_CACHE_DIR}/{document_id}.json', json_file)
