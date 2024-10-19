@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Union, Any, Optional
 
 import camelot
-from camelot.core import TableList, Table
+from camelot.core import TableList
 import pdf2image
 from PIL import Image
 import PyPDF2
@@ -15,10 +15,12 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 import text_utils
 from conf import DOCS_CACHE_DIR, get_property
+from text_utils import reformat_paragraphs, table_to_html, fix_ocr_typos
 
 # https://pyimagesearch.com/2021/11/15/tesseract-page-segmentation-modes-psms-explained-how-to-improve-your-ocr-accuracy
 # Note that you should use '--psm' or '-psm' depending on your tesseract version
 TESSERACT_CONFIG = get_property('tesseract.config', '-psm 6')
+print(f'TESSERACT_CONFIG={TESSERACT_CONFIG}')
 
 DPI: int = 150
 
@@ -64,7 +66,7 @@ class PdfPage(BaseModel):
             pytesseract.image_to_pdf_or_hocr(
                 image=img,
                 extension='pdf',
-                config='--psm 6'
+                config=TESSERACT_CONFIG
             )
         )
 
@@ -73,17 +75,19 @@ class PdfPage(BaseModel):
                 box: Optional[tuple[float, float, float, float]] = None,
                 rotated: bool = False
         ) -> str:
-            im: Image = image.copy()
+            # print(f'box={box}')
             if rotated:
-                im = im.crop(box=(box[1], box[0], box[3], box[2]))
+                im = image.crop(box=(box[1], box[0], box[3], box[2])) if box else image
                 im = im.rotate(angle=90, expand=1)
             else:
-                im = im.crop(box=(box[0], box[1], box[2], box[3]))
+                im = image.crop(box=(box[0], box[1], box[2], box[3])) if box else image
 
-            return pytesseract.image_to_string(
+            txt = pytesseract.image_to_string(
                 image=im.crop(box=(2, 0, im.width - 2, im.height)),
-                config='--psm 6'
+                config=TESSERACT_CONFIG
             )
+            # print(f'txt={txt}')
+            return txt
 
         table_list: TableList = camelot.read_pdf(
             filepath=pdf_path.as_posix(),
@@ -114,8 +118,8 @@ class PdfPage(BaseModel):
 
         # There are pages with a horizontally arranged set of tables,
         # each of which is rotated 90 degrees.
-        # Sort the tables by vertical top position to properly extract
-        # preceding plain text if any.
+        # Sort the tables by vertical top position to properly compute
+        # the bottom of preceding plain text if any.
         tables = list(table_list)
         tables.sort(key=lambda t: t.rows[0][0], reverse=True)
 
@@ -129,7 +133,8 @@ class PdfPage(BaseModel):
             table_v_btm = rows[-1][1]
 
             # Read text preceding the table, if any
-            if (text_v_top < table_v_top) and (text := _extract_text(image=img, box=(0, text_v_top, img.width, table_v_top))):
+            if (text_v_top < table_v_top) and (
+                    text := _extract_text(image=img, box=(0, text_v_top, img.width, table_v_top))):
                 self.contents.append(TextBlock.from_text(text))
 
             text_v_top = max(table_v_btm, text_v_top)
@@ -137,10 +142,13 @@ class PdfPage(BaseModel):
             # Read table cells
             avg_col_width = (cols[-1][1] - cols[0][0]) / len(cols)
             is_vertical_table = avg_col_width < 30
+            print('Vertical:', is_vertical_table)
             if is_vertical_table:
                 rows, cols = cols, rows
                 rows.reverse()
 
+            # print(f'cols={cols}')
+            # print(f'rows={rows}')
             self.contents.append(
                 TextBlock(
                     cols=len(cols),
@@ -163,10 +171,21 @@ class PdfDoc(BaseModel):
         return sum([page.get_content_len() for page in self.pages])
 
     def get_content(self) -> str:
-        texts = []
+        content = ''
+        text = ''
         for page in self.pages:
-            texts.append(page.content)
-        return text_utils.reformat_paragraphs('\n'.join(texts))
+            for text_block in page.contents:
+                if text_block.cols > 1:
+                    if text:
+                        content += '\n\n' + reformat_paragraphs(text)
+                        text = ''
+                    content += '\n\n' + table_to_html(text_block.data)
+                else:
+                    text += '\n\n' + text_block.data[0][0]
+        if text:
+            content += '\n\n' + reformat_paragraphs(text)
+
+        return fix_ocr_typos(content)
 
     def load_from_source(
             self,
@@ -199,16 +218,15 @@ class PdfDoc(BaseModel):
                 delete_file(path)
 
     def dump(self) -> str:
+        import json
         outputs: list[str] = []
         for page in self.pages:
             outputs.append(f'<------ Page {page.page_no} ------>')
-            outputs.append(text_utils.reformat_paragraphs(page.content))
-            if page.tables:
-                outputs.append("Tables:")
-                for i, table in enumerate(page.tables, 1):
-                    outputs.append(f"Table {i}")
-                    for row in table.rows:
-                        outputs.append(row)
+            for cnt in page.contents:
+                if cnt.cols == 1:
+                    outputs.extend([text_utils.reformat_paragraphs(row[0]) for row in cnt.data])
+                else:
+                    outputs.append(json.dumps(cnt.data, indent=4))
         return '\n'.join(outputs)
 
     def split_into_chucks(
@@ -305,13 +323,25 @@ logging.basicConfig(
 )
 # name = 'CCR'
 name = 'LHS'
-document_id = 1
-page_no = 45
+doc_id = 1
+page_no = 2
 
-PdfFile.read_doc(document_id=document_id, source=f'../docs/{name}.pdf', no_cache=True, first_page=page_no,
-                 last_page=page_no)
-# json_file = f'../docs/{name}.json'
+# PdfFile.read_doc(
+#     document_id=doc_id,
+#     source=f'../docs/{name}.pdf',
+#     no_cache=True
+#     # first_page=1, #page_no,
+#     # last_page=page_no
+# )
+json_file = f'../docs/{name}.json'
 # delete_file(json_file)
-# import shutil
-#
-# shutil.copy(f'{DOCS_CACHE_DIR}/{document_id}.json', json_file)
+import shutil
+
+# shutil.copy(f'{DOCS_CACHE_DIR}/{doc_id}.json', json_file)
+
+# shutil.copy(json_file, f'{DOCS_CACHE_DIR}/{doc_id}.json')
+doc: PdfDoc = PdfFile.read_doc(
+    document_id=doc_id,
+    source=f'../docs/{name}.pdf'
+)
+Path(f'../docs/{name}.txt').write_text(doc.dump())

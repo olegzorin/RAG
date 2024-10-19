@@ -1,5 +1,6 @@
 from pydantic import BaseModel
-from re import match
+from re import match, sub
+
 
 def reformat_paragraphs(
         text: str,
@@ -64,5 +65,13 @@ def reformat_paragraphs(
         lines.extend([*par.lines, ''])
     return '\n'.join(lines[:-1])
 
-def table_to_text(cells: list[list[str]]):
-    pass
+
+def table_to_html(data: list[list[str]]):
+    return ('<table border="1px"><tr><td>'
+            + '</td></tr><tr><td>'.join(['</td><td>'.join(row) for row in data])
+            + '</td></tr></table>')
+
+def fix_ocr_typos(text: str)-> str:
+    text = text.replace('|', 'I')
+    return sub('Il(?!l)','II', text)
+
