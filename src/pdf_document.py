@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Union, Any, Optional
 
 import camelot
-from camelot.core import TableList
+from camelot.core import TableList, Table
 import pdf2image
 from PIL import Image
 import PyPDF2
@@ -14,8 +14,9 @@ import pytesseract
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 import text_utils
-from conf import DOCS_CACHE_DIR, get_property
-from text_utils import reformat_paragraphs, table_to_html, fix_ocr_typos
+from conf import DOCS_CACHE_DIR, get_property, MODEL_CACHE_DIR
+from text_utils import reformat_paragraphs, table_to_html, fix_ocr_typos, split_text, text_to_markdown, \
+    table_to_markdown
 
 # https://pyimagesearch.com/2021/11/15/tesseract-page-segmentation-modes-psms-explained-how-to-improve-your-ocr-accuracy
 # Note that you should use '--psm' or '-psm' depending on your tesseract version
@@ -57,7 +58,7 @@ class PdfPage(BaseModel):
     def get_content_len(self) -> int:
         return sum([blk.get_content_len() for blk in self.contents])
 
-    def load_from_image(self, path: str) -> PdfPage:
+    def load_from_image(self, path: str) -> None:
         img: Image = Image.open(path)
         img = img.crop((0, 0, img.width, img.height * 0.936))  # cutoff footers
 
@@ -101,7 +102,7 @@ class PdfPage(BaseModel):
             if text := _extract_text(img):
                 self.contents.append(TextBlock.from_text(text))
             logger.info(f"Found no tables")
-            delete_file(pdf_path)
+            # delete_file(pdf_path)
             return
 
         # Start processing page with tables
@@ -120,7 +121,7 @@ class PdfPage(BaseModel):
         # each of which is rotated 90 degrees.
         # Sort the tables by vertical top position to properly compute
         # the bottom of preceding plain text if any.
-        tables = list(table_list)
+        tables: list[Table] = [*table_list]
         tables.sort(key=lambda t: t.rows[0][0], reverse=True)
 
         for table in tables:
@@ -170,20 +171,22 @@ class PdfDoc(BaseModel):
     def get_content_len(self) -> int:
         return sum([page.get_content_len() for page in self.pages])
 
-    def get_content(self) -> str:
+    def get_content(self, show_page_numbers: bool = False) -> str:
         content = ''
-        text = ''
-        for page in self.pages:
+        plain_text = ''
+        for i, page in enumerate(self.pages, 1):
+            if show_page_numbers:
+                content += '\n\n<--------- ' + str(i) + ' ---------->\n\n'
             for text_block in page.contents:
                 if text_block.cols > 1:
-                    if text:
-                        content += '\n\n' + reformat_paragraphs(text)
-                        text = ''
-                    content += '\n\n' + table_to_html(text_block.data)
+                    if plain_text:
+                        content += '\n\n' + text_to_markdown(plain_text)
+                        plain_text = ''
+                    content += '\n\n' + table_to_markdown(text_block.data)
                 else:
-                    text += '\n\n' + text_block.data[0][0]
-        if text:
-            content += '\n\n' + reformat_paragraphs(text)
+                    plain_text += text_block.data[0][0]
+        if plain_text:
+            content += '\n\n' + text_to_markdown(plain_text)
 
         return fix_ocr_typos(content)
 
@@ -211,52 +214,12 @@ class PdfDoc(BaseModel):
             for i, path in enumerate(img_paths, 1):
                 logger.info(f"Read page {i}")
                 page = PdfPage(page_no=i)
-                page.load_from_image(path)
+                page.load_from_image(f'{path}')
                 self.pages.append(page)
         finally:
             for path in img_paths:
-                delete_file(path)
-
-    def dump(self) -> str:
-        import json
-        outputs: list[str] = []
-        for page in self.pages:
-            outputs.append(f'<------ Page {page.page_no} ------>')
-            for cnt in page.contents:
-                if cnt.cols == 1:
-                    outputs.extend([text_utils.reformat_paragraphs(row[0]) for row in cnt.data])
-                else:
-                    outputs.append(json.dumps(cnt.data, indent=4))
-        return '\n'.join(outputs)
-
-    def split_into_chucks(
-            self,
-            chunkers: list[Any],
-            *,
-            save_chunks: bool = False
-    ) -> list[str]:
-        text = self.get_content()
-        chunks = []
-        for chunker in chunkers:
-            _chunks = chunker.split_text(text)
-            logger.info(f'{chunker.__class__.__name__}: chunks={len(_chunks)}, maxlen={max([len(c) for c in _chunks])}')
-            chunks.extend(_chunks)
-
-        table_rows = self.get_table_rows()
-
-        if save_chunks:
-            # Save the chunks to a file for review
-            filename = f'{self.id}.chunks'
-            with open(Path(DOCS_CACHE_DIR, filename), 'w') as f:
-                for i, chunk in enumerate(chunks, 1):
-                    f.write(f'\n\n<--------- text {i} ---------->\n')
-                    f.write(chunk)
-                for i, chunk in enumerate(table_rows, 1):
-                    f.write(f'\n\n<--------- table {i} ---------->\n')
-                    f.write(chunk)
-
-        chunks.extend(table_rows)
-        return list(map(lambda s: s.lower(), chunks))
+                pass
+                # delete_file(f'{path}')
 
 
 class PdfFile(PdfDoc):
@@ -326,22 +289,70 @@ name = 'LHS'
 doc_id = 1
 page_no = 2
 
-# PdfFile.read_doc(
-#     document_id=doc_id,
-#     source=f'../docs/{name}.pdf',
-#     no_cache=True
-#     # first_page=1, #page_no,
-#     # last_page=page_no
-# )
-json_file = f'../docs/{name}.json'
+PdfFile.read_doc(
+    document_id=doc_id,
+    source=f'../docs/{name}.pdf',
+    no_cache=True,
+    first_page=12,  # page_no,
+    last_page=12
+)
+# json_file = f'../docs/{name}.json'
 # delete_file(json_file)
-import shutil
+# import shutil
 
 # shutil.copy(f'{DOCS_CACHE_DIR}/{doc_id}.json', json_file)
 
 # shutil.copy(json_file, f'{DOCS_CACHE_DIR}/{doc_id}.json')
-doc: PdfDoc = PdfFile.read_doc(
-    document_id=doc_id,
-    source=f'../docs/{name}.pdf'
-)
-Path(f'../docs/{name}.txt').write_text(doc.dump())
+# doc: PdfDoc = PdfFile.read_doc(
+#     document_id=doc_id,
+#     source=f'../docs/{name}.pdf'
+# )
+# Path(f'../docs/{name}.txt').write_text(doc.dump())
+
+# from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+#
+# embeddings_model = HuggingFaceBgeEmbeddings(
+#     model_name="BAAI/bge-m3",
+#     model_kwargs={'device': 'cpu'},
+#     cache_folder=MODEL_CACHE_DIR
+# )
+from langchain_experimental.text_splitter import SemanticChunker
+
+# chunker = SemanticChunker(embeddings=embeddings_model)
+
+# from llama_index.core.node_parser import SemanticSplitterNodeParser
+#
+# class X:
+#
+#     def __init__(self):
+#         from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+#
+#         embed_model = HuggingFaceEmbedding(
+#             model_name="BAAI/bge-m3",
+#             device='mps',
+#             cache_folder=MODEL_CACHE_DIR  # device='cuda')
+#         )
+#
+#         self.chunker = SemanticSplitterNodeParser(
+#             buffer_size=1,
+#             breakpoint_percentile_threshold=95,
+#             embed_model=embed_model,
+#
+#         )
+#
+#     def split_text(self, text: str):
+#         from llama_index.core.schema import Document
+#         return [node.get_content() for node in self.chunker.get_nodes_from_documents(documents=[Document(text=text)], show_progress=False)]
+#
+#
+# chunker = X()
+# chunks = split_text(doc.get_content(), chunker, 3000)
+#
+# print('count: ', len(chunks))
+# print('maxlen: ', max([len(c) for c in chunks]))
+# print('minlen: ', min([len(c) for c in chunks]))
+# # chunks.sort(key=lambda s: len(s))
+# with open('chunks.txt', 'w') as f:
+#     for c in chunks:
+#         f.write(c)
+#         f.write('\n\n--------\n\n')

@@ -1,69 +1,96 @@
-from pydantic import BaseModel
-from re import match, sub
+from re import match, sub, split, search
 
 
-def reformat_paragraphs(
-        text: str,
-        paragraph_endline_threshold: float = 0.8
-) -> str:
-    lines = [l.rstrip() for l in text.strip().splitlines()]
+def _flat_map(inp: list[str], func) -> list[str]:
+    out: list[str] = []
+    for x in inp:
+        out.extend(func(x))
+    return out
+
+
+def _split_by_empty_lines(text: str) -> list[str]:
+    return split(r'\s*\n\s*\n\s*', text)
+
+
+def _split_by_numeration(text: str) -> list[str]:
+    pars: list[str] = []
+    last_par = ''
+    for line in text.splitlines():
+        if (match(r'\(?[0-9.]+\)?\s+', line) is not None
+                or match(r'\(?[a-zA-Z][.)]\s+', line) is not None
+                or match(r'[oe*]\s+', line) is not None):
+            if last_par:
+                pars.append(last_par)
+                last_par = ''
+        last_par += line + '\n'
+    if last_par:
+        pars.append(last_par)
+    return pars
+
+
+def _split_by_short_lines(text: str, threshold: float = 0.8) -> list[str]:
+    pars: list[str] = []
+    lines = text.splitlines()
     max_line_len = max([len(l) for l in lines])
-
-    def _is_paragraph_endline(l: str):
-        return len(l) < paragraph_endline_threshold * max_line_len and l.endswith(('.', ':', '!', '?'))
-
-    def _is_list_item(l: str) -> bool:
-        return (match('^\\(?[0-9.]+\\)?\\s+', l) is not None
-                or match('^\\(?[a-zA-Z][.)]\\s+', l) is not None
-                or match('^[oe*]\\s+', l) is not None)
-
-    class Block(BaseModel):
-        lines: list[str] = []
-
-    # Extract blocks separated by empty lines
-    blocks: list[Block] = []
-    block_lines = []
+    last_par = ''
     for line in lines:
-        if line:
-            block_lines.append(line)
-        elif block_lines:
-            blocks.append(Block(lines=block_lines))
-            block_lines = []
-    if block_lines:
-        blocks.append(Block(lines=block_lines))
+        last_par += line + '\n'
+        if len(line) < threshold * max_line_len and line.endswith(('.', ':', '!', '?')):
+            pars.append(last_par)
+            last_par = ''
+    if last_par:
+        pars.append(last_par)
+    return pars
 
-    blocks1: list[Block] = []
-    block = blocks[0]
-    for i, blk in enumerate(blocks[1:]):
-        if blk.lines[0][1].islower():
-            block.lines.extend(blk.lines)
+
+def _split_by_headings(text: str) -> list[str]:
+    pars: list[str] = []
+    last_par = ''
+    for line in text.splitlines():
+        if search(r'[A-Z]+', line) and (search(r'[a-z]+', line) is None):
+            if last_par:
+                pars.append(last_par)
+                last_par = ''
+            prefix = '### ' if match(r'\(?[A-Z][.)]', line) else '## '
+            pars.append(prefix + line + '\n')
         else:
-            blocks1.append(block)
-            block = blk
-    blocks1.append(block)
+            last_par += line + '\n'
+    if last_par:
+        pars.append(last_par)
+    return pars
 
-    # Extract paragraphs from the blocks
-    pars: list[Block] = []
-    for blk in blocks1:
-        par_lines = []
-        for l in blk.lines:
-            if _is_list_item(l):
-                if par_lines:
-                    pars.append(Block(lines=par_lines))
-                par_lines = [l]
-            else:
-                par_lines.append(l)
-                if _is_paragraph_endline(l):
-                    pars.append(Block(lines=par_lines))
-                    par_lines = []
-        if par_lines:
-            pars.append(Block(lines=par_lines))
 
-    # Compose the text
-    lines = []
-    for par in pars:
-        lines.extend([*par.lines, ''])
-    return '\n'.join(lines[:-1])
+def _fix_ocr_typos(text: str) -> str:
+    text = text.replace('|', 'I')
+    return sub(r'Il+(?![A-Za-z])', lambda x: x.group().replace('l', 'I'), text)
+
+
+def text_to_markdown(text: str) -> str:
+    text = _fix_ocr_typos(text)
+    pars = _split_by_empty_lines(text)
+    pars = _flat_map(pars, _split_by_numeration)
+    pars = _flat_map(pars, _split_by_short_lines)
+    pars = _flat_map(pars, _split_by_headings)
+    return ''.join(pars)
+
+
+def _is_table_with_headers(rows: list[list[str]]) -> bool:
+    # Check number of rows
+    if len(rows) < 2:
+        return False
+
+    # Check number of columns
+    if len(rows[0]) > 2:
+        return True
+
+    # Check max num of lines in the cells of the first row
+    max_lines_in_first_row = max([len(cell.splitlines()) for cell in rows[0]])
+    if max_lines_in_first_row != 1:
+        return False
+
+    max_lines_in_first_column = max([len(row[0].splitlines()) for row in rows[1:]])
+    max_lines_in_second_column = max([len(row[1].splitlines()) for row in rows[1:]])
+    return max_lines_in_first_column <= 1 or max_lines_in_second_column <= 1
 
 
 def table_to_html(data: list[list[str]]):
@@ -71,7 +98,37 @@ def table_to_html(data: list[list[str]]):
             + '</td></tr><tr><td>'.join(['</td><td>'.join(row) for row in data])
             + '</td></tr></table>')
 
-def fix_ocr_typos(text: str)-> str:
-    text = text.replace('|', 'I')
-    return sub('Il(?!l)','II', text)
 
+def table_to_markdown(rows: list[list[str]]):
+    if not _is_table_with_headers(rows):
+        rows.insert(0, ['     ' for _ in rows[0]])
+    text = '| ' + ' | '.join(rows[0]).replace('\n', '<br/>') + ' |\n'
+    text += ''.join(['|:------' for _ in rows[0]]) + '|\n'
+    for row in rows[1:]:
+        text += '| ' + ' | '.join(row).replace('\n', '<br/>') + ' |\n'
+    return text
+
+
+def split_text(text: str, chunker, max_chunk_size: int = 0):
+    chunks: list[str] = chunker.split_text(text)
+    large_count: int
+    print('count: ', len(chunks))
+    if max_chunk_size == 0 or (large_count := len([c for c in chunks if len(c) > max_chunk_size])) == 0:
+        return chunks
+
+    while large_count > 0:
+        large_count = 0
+        new_chunks = []
+        for chunk in chunks:
+            if len(chunk) <= max_chunk_size:
+                new_chunks.append(chunk)
+            else:
+                large_count += 1
+                sub_chunks = chunker.split_text(chunk)
+                if len(sub_chunks) == 1:
+                    raise Exception("Cannot reduce chunk: " + chunk)
+                new_chunks.extend(sub_chunks)
+        chunks = new_chunks
+        print('count: ', len(chunks), ', large: ', large_count)
+
+    return chunks
