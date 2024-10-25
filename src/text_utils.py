@@ -2,6 +2,7 @@ import re
 from re import match, sub, split, search
 
 END_OF_SENTENCE = ('.', ':', '!', '?')
+END_OF_LIST_ITEM = (';', '.', ':')
 
 def _fix_ocr_typos(text: str) -> str:
     text = text.replace('|', 'I')
@@ -29,7 +30,7 @@ def _split_by_numeration(text: str) -> list[str]:
                 or match(r'\(?[a-zA-Z][.)]\s+', line) is not None):
             if last_par_lines:
                 par = '\n'.join(last_par_lines)
-                if item_end and not par.endswith((';', '.')):
+                if item_end and not par.endswith(END_OF_LIST_ITEM):
                     par += item_end
                 pars.append(par)
                 last_par_lines = []
@@ -37,7 +38,7 @@ def _split_by_numeration(text: str) -> list[str]:
         last_par_lines.append(line)
     if last_par_lines:
         par = '\n'.join(last_par_lines)
-        if item_end and not par.endswith((';', '.')):
+        if item_end and not par.endswith(END_OF_LIST_ITEM):
             par += item_end
         pars.append(par)
     return pars
@@ -53,7 +54,7 @@ def _split_by_items(text: str) -> list[str]:
         if m is not None:
             if last_par_lines:
                 par = '\n'.join(last_par_lines)
-                if item_end and not par.endswith((';', '.')):
+                if item_end and not par.endswith(END_OF_LIST_ITEM):
                     par += item_end
                 pars.append(par)
                 last_par_lines = []
@@ -62,7 +63,7 @@ def _split_by_items(text: str) -> list[str]:
         last_par_lines.append(line)
     if last_par_lines:
         par = '\n'.join(last_par_lines)
-        if item_end and not par.endswith((';', '.')):
+        if item_end and not par.endswith(END_OF_LIST_ITEM):
             par += item_end
         pars.append(par)
     return pars
@@ -102,13 +103,13 @@ def _split_by_headings(text: str) -> list[str]:
 
 
 def _join_paragraphs(pars: list[str]):
-    text = pars[0] + '\n'
+    text = pars[0]
     for i, par in enumerate(pars[1:], 1):
         if search(r'[a-z,]$', pars[i - 1]) and match(r'[A-Za-z][a-z]+', par):
             # parts of a single paragraph: do not separate by empty line
-            text += par + '\n'
+            text += '\n' + par
         else:
-            text += '\n' + par + '\n'
+            text += '\n\n' + par
     return text
 
 
@@ -128,33 +129,41 @@ def _is_table_with_headers(rows: list[list[str]]) -> bool:
         return False
 
     # Check number of columns
-    if len(rows[0]) > 2:
+    if len(rows[0]) > 3:
         return True
 
-    # Check max num of lines in the cells of the first row
-    max_lines_in_first_row = max([len(cell.splitlines()) for cell in rows[0]])
-    if max_lines_in_first_row != 1:
+    # Check num of lines in the cells of the first row
+    h_lines = [len(cell.splitlines()) for cell in rows[0]]
+    if min(h_lines) == 0:  # headers must not be empty
         return False
+    if max(h_lines) == 1:  # most likely the headers row
+        return True
 
     max_lines_in_first_column = max([len(row[0].splitlines()) for row in rows[1:]])
     max_lines_in_second_column = max([len(row[1].splitlines()) for row in rows[1:]])
     return max_lines_in_first_column <= 1 or max_lines_in_second_column <= 1
 
-
-def table_to_html(data: list[list[str]]):
-    return ('<table border="1px"><tr><td>'
-            + '</td></tr><tr><td>'.join(['</td><td>'.join(row) for row in data])
-            + '</td></tr></table>')
+def _table_cell_to_markdown(text: str) -> str:
+    if not text.strip():
+        return ''
+    text = _fix_ocr_typos(text)
+    pars = _split_by_empty_lines(text)
+    pars = _flat_map(pars, _split_by_short_lines)
+    pars = _flat_map(pars, _split_by_items)
+    pars = _flat_map(pars, _split_by_numeration)
+    return _join_paragraphs(pars).replace('\n', '<br/>')
 
 
 def table_to_markdown(rows: list[list[str]]):
-    n_rows, n_cols = (len(rows), len(rows[0]))
+    with_headers = _is_table_with_headers(rows)
 
-    for i in range(n_rows):
+    n_cols = len(rows[0])
+
+    for i in range(len(rows)):
         for j in range(n_cols):
-            rows[i][j] = _fix_ocr_typos(rows[i][j]).replace('\n', '<br/>')
+            rows[i][j] = _table_cell_to_markdown(rows[i][j])
 
-    if not _is_table_with_headers(rows):
+    if not with_headers:
         # Add empty headers
         rows.insert(0, ['     '] * n_cols)
 
