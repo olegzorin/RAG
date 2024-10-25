@@ -1,4 +1,11 @@
+import re
 from re import match, sub, split, search
+
+END_OF_SENTENCE = ('.', ':', '!', '?')
+
+def _fix_ocr_typos(text: str) -> str:
+    text = text.replace('|', 'I')
+    return sub(r'Il+(?![A-Za-z])', lambda x: x.group().replace('l', 'I'), text)
 
 
 def _flat_map(inp: list[str], func) -> list[str]:
@@ -11,67 +18,108 @@ def _flat_map(inp: list[str], func) -> list[str]:
 def _split_by_empty_lines(text: str) -> list[str]:
     return split(r'\s*\n\s*\n\s*', text)
 
-
+# List items often lack the end-of-sentence character (.;).
+# Add it to make _join_paragraphs work correctly.
 def _split_by_numeration(text: str) -> list[str]:
     pars: list[str] = []
-    last_par = ''
+    last_par_lines = []
+    item_end = ''
     for line in text.splitlines():
         if (match(r'\(?[0-9.]+\)?\s+', line) is not None
-                or match(r'\(?[a-zA-Z][.)]\s+', line) is not None
-                or match(r'[oe*]\s+', line) is not None):
-            if last_par:
-                pars.append(last_par)
-                last_par = ''
-        last_par += line + '\n'
-    if last_par:
-        pars.append(last_par)
+                or match(r'\(?[a-zA-Z][.)]\s+', line) is not None):
+            if last_par_lines:
+                par = '\n'.join(last_par_lines)
+                if item_end and not par.endswith((';', '.')):
+                    par += item_end
+                pars.append(par)
+                last_par_lines = []
+            item_end = '.'
+        last_par_lines.append(line)
+    if last_par_lines:
+        par = '\n'.join(last_par_lines)
+        if item_end and not par.endswith((';', '.')):
+            par += item_end
+        pars.append(par)
     return pars
 
+# List items often lack the end-of-sentence character (.;).
+# Add it to make _join_paragraphs work correctly.
+def _split_by_items(text: str) -> list[str]:
+    pars: list[str] = []
+    last_par_lines = []
+    item_end = ''
+    for line in text.splitlines():
+        m = match(r'[oe«¢*]\s+', line)
+        if m is not None:
+            if last_par_lines:
+                par = '\n'.join(last_par_lines)
+                if item_end and not par.endswith((';', '.')):
+                    par += item_end
+                pars.append(par)
+                last_par_lines = []
+            line = '* ' + line[m.end():]
+            item_end = '.'
+        last_par_lines.append(line)
+    if last_par_lines:
+        par = '\n'.join(last_par_lines)
+        if item_end and not par.endswith((';', '.')):
+            par += item_end
+        pars.append(par)
+    return pars
 
+# Short line with a sentence end mark at the end
+# is most likely the last line of a paragraph.
 def _split_by_short_lines(text: str, threshold: float = 0.8) -> list[str]:
     pars: list[str] = []
     lines = text.splitlines()
     max_line_len = max([len(l) for l in lines])
-    last_par = ''
+    last_par_lines = []
     for line in lines:
-        last_par += line + '\n'
-        if len(line) < threshold * max_line_len and line.endswith(('.', ':', '!', '?')):
-            pars.append(last_par)
-            last_par = ''
-    if last_par:
-        pars.append(last_par)
+        last_par_lines.append(line)
+        if len(line) < threshold * max_line_len and line.endswith(END_OF_SENTENCE):
+            pars.append('\n'.join(last_par_lines))
+            last_par_lines = []
+    if last_par_lines:
+        pars.append('\n'.join(last_par_lines))
     return pars
 
-
+# All-caps text lines are section headins
 def _split_by_headings(text: str) -> list[str]:
     pars: list[str] = []
-    last_par = ''
+    last_par_lines = []
     for line in text.splitlines():
         if search(r'[A-Z]+', line) and (search(r'[a-z]+', line) is None):
-            if last_par:
-                pars.append(last_par)
-                last_par = ''
-            prefix = '### ' if match(r'\(?[A-Z][.)]', line) else '## '
-            pars.append(prefix + line + '\n')
+            if last_par_lines:
+                pars.append('\n'.join(last_par_lines))
+                last_par_lines = []
+            prefix = '### ' if match(r'\(?[A-Z0-9][0-9]?[.)]', line) else '## '
+            pars.append(prefix + line)
         else:
-            last_par += line + '\n'
-    if last_par:
-        pars.append(last_par)
+            last_par_lines.append(line)
+    if last_par_lines:
+        pars.append('\n'.join(last_par_lines))
     return pars
 
 
-def _fix_ocr_typos(text: str) -> str:
-    text = text.replace('|', 'I')
-    return sub(r'Il+(?![A-Za-z])', lambda x: x.group().replace('l', 'I'), text)
+def _join_paragraphs(pars: list[str]):
+    text = pars[0] + '\n'
+    for i, par in enumerate(pars[1:], 1):
+        if search(r'[a-z,]$', pars[i - 1]) and match(r'[A-Za-z][a-z]+', par):
+            # parts of a single paragraph: do not separate by empty line
+            text += par + '\n'
+        else:
+            text += '\n' + par + '\n'
+    return text
 
 
 def text_to_markdown(text: str) -> str:
     text = _fix_ocr_typos(text)
     pars = _split_by_empty_lines(text)
-    pars = _flat_map(pars, _split_by_numeration)
     pars = _flat_map(pars, _split_by_short_lines)
     pars = _flat_map(pars, _split_by_headings)
-    return ''.join(pars)
+    pars = _flat_map(pars, _split_by_items)
+    pars = _flat_map(pars, _split_by_numeration)
+    return _join_paragraphs(pars)
 
 
 def _is_table_with_headers(rows: list[list[str]]) -> bool:
@@ -100,13 +148,20 @@ def table_to_html(data: list[list[str]]):
 
 
 def table_to_markdown(rows: list[list[str]]):
+    n_rows, n_cols = (len(rows), len(rows[0]))
+
+    for i in range(n_rows):
+        for j in range(n_cols):
+            rows[i][j] = _fix_ocr_typos(rows[i][j]).replace('\n', '<br/>')
+
     if not _is_table_with_headers(rows):
-        rows.insert(0, ['     ' for _ in rows[0]])
-    text = '| ' + ' | '.join(rows[0]).replace('\n', '<br/>') + ' |\n'
-    text += ''.join(['|:------' for _ in rows[0]]) + '|\n'
-    for row in rows[1:]:
-        text += '| ' + ' | '.join(row).replace('\n', '<br/>') + ' |\n'
-    return text
+        # Add empty headers
+        rows.insert(0, ['     '] * n_cols)
+
+    # Insert ruler
+    rows.insert(1, [':------'] * n_cols)
+
+    return ''.join(['| ' + ' | '.join(row) + ' |\n' for row in rows])
 
 
 def split_text(text: str, chunker, max_chunk_size: int = 0):

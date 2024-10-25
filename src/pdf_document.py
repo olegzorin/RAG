@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Union, Any, Optional
+from typing import Union, Optional
 
 import camelot
 from camelot.core import TableList, Table
@@ -13,24 +13,20 @@ import PyPDF2
 import pytesseract
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-import text_utils
-from conf import DOCS_CACHE_DIR, get_property, MODEL_CACHE_DIR
-from text_utils import reformat_paragraphs, table_to_html, fix_ocr_typos, split_text, text_to_markdown, \
-    table_to_markdown
+from conf import DOCS_CACHE_DIR, get_property
+from text_utils import table_to_markdown, text_to_markdown
+
+logger = logging.getLogger(__name__)
 
 # https://pyimagesearch.com/2021/11/15/tesseract-page-segmentation-modes-psms-explained-how-to-improve-your-ocr-accuracy
 # Note that you should use '--psm' or '-psm' depending on your tesseract version
 TESSERACT_CONFIG = get_property('tesseract.config', '-psm 6')
-print(f'TESSERACT_CONFIG={TESSERACT_CONFIG}')
+logger.info(f'TESSERACT_CONFIG={TESSERACT_CONFIG}')
 
 DPI: int = 150
 
-logger = logging.getLogger(__name__)
 
-
-def delete_file(
-        path: Union[str, Path]
-) -> None:
+def delete_file(path: Union[str, Path]):
     try:
         if os.path.exists(path):
             os.remove(path)
@@ -90,79 +86,81 @@ class PdfPage(BaseModel):
             # print(f'txt={txt}')
             return txt
 
-        table_list: TableList = camelot.read_pdf(
-            filepath=pdf_path.as_posix(),
-            pages='1',
-            suppress_stdout=True,
-            backend='ghostscript',
-            resolution=DPI
-        )
-
-        if table_list is None or table_list.n == 0:
-            if text := _extract_text(img):
-                self.contents.append(TextBlock.from_text(text))
-            logger.info(f"Found no tables")
-            # delete_file(pdf_path)
-            return
-
-        # Start processing page with tables
-        logger.info(f"Found {table_list.n} tables")
-
-        # Convertion of PDF coordinate system to pixels
-        pdf = PyPDF2.PdfReader(pdf_path)
-        mediabox = pdf.pages[0].mediabox
-        h_scale = img.width / float(mediabox.width)
-        v_scale = img.height / float(mediabox.height)
-
-        # Vertical position of the top of the text
-        text_v_top = 0
-
-        # There are pages with a horizontally arranged set of tables,
-        # each of which is rotated 90 degrees.
-        # Sort the tables by vertical top position to properly compute
-        # the bottom of preceding plain text if any.
-        tables: list[Table] = [*table_list]
-        tables.sort(key=lambda t: t.rows[0][0], reverse=True)
-
-        for table in tables:
-            # Absolute cordinates (start position and end positions) of the rows and columns in pixels
-            rows = [(img.height - v_scale * r[0], img.height - v_scale * r[1]) for r in table.rows]
-            cols = [(h_scale * c[0], h_scale * c[1]) for c in table.cols]
-
-            # Vertical positions of the top and bottom of the table
-            table_v_top = rows[0][0]
-            table_v_btm = rows[-1][1]
-
-            # Read text preceding the table, if any
-            if (text_v_top < table_v_top) and (
-                    text := _extract_text(image=img, box=(0, text_v_top, img.width, table_v_top))):
-                self.contents.append(TextBlock.from_text(text))
-
-            text_v_top = max(table_v_btm, text_v_top)
-
-            # Read table cells
-            avg_col_width = (cols[-1][1] - cols[0][0]) / len(cols)
-            is_vertical_table = avg_col_width < 30
-            print('Vertical:', is_vertical_table)
-            if is_vertical_table:
-                rows, cols = cols, rows
-                rows.reverse()
-
-            # print(f'cols={cols}')
-            # print(f'rows={rows}')
-            self.contents.append(
-                TextBlock(
-                    cols=len(cols),
-                    rows=len(rows),
-                    data=[[
-                        _extract_text(image=img, box=(col[0], row[0], col[1], row[1]), rotated=is_vertical_table)
-                        for col in cols
-                    ] for row in rows]
-                )
+        try:
+            table_list: TableList = camelot.read_pdf(
+                filepath=pdf_path.as_posix(),
+                pages='1',
+                suppress_stdout=True,
+                backend='ghostscript',
+                resolution=DPI
             )
 
-        if text := _extract_text(image=img, box=(0, text_v_top, img.width, img.height)):
-            self.contents.append(TextBlock.from_text(text))
+            if table_list is None or table_list.n == 0:
+                if text := _extract_text(img):
+                    self.contents.append(TextBlock.from_text(text))
+                logger.info(f"Found no tables")
+                return
+
+            # Start processing page with tables
+            logger.info(f"Found {table_list.n} tables")
+
+            # Convertion of PDF coordinate system to pixels
+            pdf = PyPDF2.PdfReader(pdf_path)
+            mediabox = pdf.pages[0].mediabox
+            h_scale = img.width / float(mediabox.width)
+            v_scale = img.height / float(mediabox.height)
+
+            # Vertical position of the top of the text
+            text_v_top = 0
+
+            # There are pages with a horizontally arranged set of tables,
+            # each of which is rotated 90 degrees.
+            # Sort the tables by vertical top position to properly compute
+            # the bottom of preceding plain text if any.
+            tables: list[Table] = [*table_list]
+            tables.sort(key=lambda t: t.rows[0][0], reverse=True)
+
+            for table in tables:
+                # Absolute cordinates (start position and end positions) of the rows and columns in pixels
+                rows = [(img.height - v_scale * r[0], img.height - v_scale * r[1]) for r in table.rows]
+                cols = [(h_scale * c[0], h_scale * c[1]) for c in table.cols]
+
+                # Vertical positions of the top and bottom of the table
+                table_v_top = rows[0][0]
+                table_v_btm = rows[-1][1]
+
+                # Read text preceding the table, if any
+                if (text_v_top < table_v_top) and (
+                        text := _extract_text(image=img, box=(0, text_v_top, img.width, table_v_top))):
+                    self.contents.append(TextBlock.from_text(text))
+
+                text_v_top = max(table_v_btm, text_v_top)
+
+                # Read table cells
+                avg_col_width = (cols[-1][1] - cols[0][0]) / len(cols)
+                is_vertical_table = avg_col_width < 30
+                # print('Vertical:', is_vertical_table)
+                if is_vertical_table:
+                    rows, cols = cols, rows
+                    rows.reverse()
+
+                # print(f'cols={cols}')
+                # print(f'rows={rows}')
+                self.contents.append(
+                    TextBlock(
+                        cols=len(cols),
+                        rows=len(rows),
+                        data=[[
+                            _extract_text(image=img, box=(col[0], row[0], col[1], row[1]), rotated=is_vertical_table)
+                            for col in cols
+                        ] for row in rows]
+                    )
+                )
+
+            if text := _extract_text(image=img, box=(0, text_v_top, img.width, img.height)):
+                self.contents.append(TextBlock.from_text(text))
+        finally:
+            delete_file(pdf_path)
 
 
 class PdfDoc(BaseModel):
@@ -188,7 +186,7 @@ class PdfDoc(BaseModel):
         if plain_text:
             content += '\n\n' + text_to_markdown(plain_text)
 
-        return fix_ocr_typos(content)
+        return content
 
     def load_from_source(
             self,
@@ -198,6 +196,7 @@ class PdfDoc(BaseModel):
             last_page: int | None = None
     ) -> None:
 
+        doc_name = Path(source).stem
         temp_folder = Path(DOCS_CACHE_DIR, 'temp')
         os.makedirs(temp_folder, exist_ok=True)
 
@@ -212,14 +211,13 @@ class PdfDoc(BaseModel):
         )
         try:
             for i, path in enumerate(img_paths, 1):
-                logger.info(f"Read page {i}")
+                logger.info(f"{doc_name}: read page {i}")
                 page = PdfPage(page_no=i)
                 page.load_from_image(f'{path}')
                 self.pages.append(page)
         finally:
             for path in img_paths:
-                pass
-                # delete_file(f'{path}')
+                delete_file(f'{path}')
 
 
 class PdfFile(PdfDoc):
@@ -234,7 +232,6 @@ class PdfFile(PdfDoc):
             last_page: int | None = None,
             no_cache: bool = False
     ) -> PdfDoc:
-        logger.info("Read PDF")
 
         delete_source = False
 
@@ -243,6 +240,8 @@ class PdfFile(PdfDoc):
             if is_url(source):
                 source = download_url(source)
                 delete_source = True
+
+            logger.info(f"Source={Path(source).stem}")
 
             import hashlib
             with open(source, "rb") as f:
@@ -278,81 +277,3 @@ class PdfFile(PdfDoc):
         finally:
             if delete_source:
                 delete_file(source)
-
-
-logging.basicConfig(
-    level=logging.INFO,
-    force=True
-)
-# name = 'CCR'
-name = 'LHS'
-doc_id = 1
-page_no = 2
-
-PdfFile.read_doc(
-    document_id=doc_id,
-    source=f'../docs/{name}.pdf',
-    no_cache=True,
-    first_page=12,  # page_no,
-    last_page=12
-)
-# json_file = f'../docs/{name}.json'
-# delete_file(json_file)
-# import shutil
-
-# shutil.copy(f'{DOCS_CACHE_DIR}/{doc_id}.json', json_file)
-
-# shutil.copy(json_file, f'{DOCS_CACHE_DIR}/{doc_id}.json')
-# doc: PdfDoc = PdfFile.read_doc(
-#     document_id=doc_id,
-#     source=f'../docs/{name}.pdf'
-# )
-# Path(f'../docs/{name}.txt').write_text(doc.dump())
-
-# from langchain_community.embeddings import HuggingFaceBgeEmbeddings
-#
-# embeddings_model = HuggingFaceBgeEmbeddings(
-#     model_name="BAAI/bge-m3",
-#     model_kwargs={'device': 'cpu'},
-#     cache_folder=MODEL_CACHE_DIR
-# )
-from langchain_experimental.text_splitter import SemanticChunker
-
-# chunker = SemanticChunker(embeddings=embeddings_model)
-
-# from llama_index.core.node_parser import SemanticSplitterNodeParser
-#
-# class X:
-#
-#     def __init__(self):
-#         from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-#
-#         embed_model = HuggingFaceEmbedding(
-#             model_name="BAAI/bge-m3",
-#             device='mps',
-#             cache_folder=MODEL_CACHE_DIR  # device='cuda')
-#         )
-#
-#         self.chunker = SemanticSplitterNodeParser(
-#             buffer_size=1,
-#             breakpoint_percentile_threshold=95,
-#             embed_model=embed_model,
-#
-#         )
-#
-#     def split_text(self, text: str):
-#         from llama_index.core.schema import Document
-#         return [node.get_content() for node in self.chunker.get_nodes_from_documents(documents=[Document(text=text)], show_progress=False)]
-#
-#
-# chunker = X()
-# chunks = split_text(doc.get_content(), chunker, 3000)
-#
-# print('count: ', len(chunks))
-# print('maxlen: ', max([len(c) for c in chunks]))
-# print('minlen: ', min([len(c) for c in chunks]))
-# # chunks.sort(key=lambda s: len(s))
-# with open('chunks.txt', 'w') as f:
-#     for c in chunks:
-#         f.write(c)
-#         f.write('\n\n--------\n\n')
