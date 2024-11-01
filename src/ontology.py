@@ -6,9 +6,8 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
 
 import re
-import reader
-from conf import MODEL_CACHE_DIR, get_property
-from reader import PdfDoc
+from conf import MODEL_CACHE_DIR, get_property, DOCS_CACHE_DIR
+from pdf_document import PdfDoc
 
 nest_asyncio.apply()
 
@@ -211,7 +210,7 @@ splitter = SemanticSplitterNodeParser(
 document_id = 1
 shutil.copy(
     src='../docs/CCR.json',
-    dst=f'{reader.DOCS_FOLDER}/{document_id}.json'
+    dst=f'{DOCS_CACHE_DIR}/{document_id}.json'
 )
 
 from llama_index.core.schema import Document
@@ -403,7 +402,6 @@ print("final outputs =", outputs)
 
 # Close the neo4j connection explicitly.
 graph_store.close()
-
 
 '''
 llm_output =  if_leveled_plan^per_diem^rates^for_each_level^per_level^payment^wage^compensation^rate^remuneration^salary^stipend^wages^hourly_rate^daily_rate

@@ -12,7 +12,7 @@ from neo4j.exceptions import DatabaseError, ClientError
 
 import conf
 from core import RagSearch, SemanticSplitter, ParagraphSplitter
-from reader import PdfDoc
+from pdf_document import PdfDoc
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ class GraphSearch(RagSearch):
             chunk_size=chunk_size
         )
 
-        parent_chunks = document.split_into_chucks([parent_chunker])
+        parent_chunks = parent_chunker.split_text(text=document.get_content())
         logger.debug(f"parent chunks {len(parent_chunks)}")
 
         child_counts: [int] = []

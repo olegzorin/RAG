@@ -14,7 +14,7 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_experimental.text_splitter import SemanticChunker
 
 from conf import get_property, MODEL_CACHE_DIR
-from reader import PdfDoc
+from pdf_document import PdfDoc
 
 DEFAULT_EMBEDDINGS_MODEL = "BAAI/bge-m3"
 # DEFAULT_EMBEDDINGS_MODEL = "all-MiniLM-L6-v2"

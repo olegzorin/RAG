@@ -4,9 +4,9 @@ from typing import Dict
 
 from langchain.retrievers import EnsembleRetriever
 
-from core import RagSearch, SemanticSplitter, ParagraphSplitter
+from core import RagSearch, SemanticSplitter
 from db import Neo4jDB
-from reader import PdfDoc
+from pdf_document import PdfDoc
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -44,14 +44,11 @@ class VectorSearch(RagSearch):
 
         chunk_size = int(self.params.get("reader.chunk_size", 384))
 
-        chunks = document.split_into_chucks(
-            chunkers=[
-                SemanticSplitter(
-                    embeddings=self.embeddings_model,
-                    chunk_size=chunk_size
-                )#,
-                # ParagraphSplitter()
-            ]
+        chunks = SemanticSplitter(
+            embeddings=self.embeddings_model,
+            chunk_size=chunk_size
+        ).split_text(
+            text=document.get_content()
         )
 
         vectorstore = None

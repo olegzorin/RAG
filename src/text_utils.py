@@ -1,12 +1,18 @@
-import re
-from re import match, sub, split, search
+from re import match, split, search
+
+import numpy as np
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+
+from conf import MODEL_CACHE_DIR
 
 END_OF_SENTENCE = ('.', ':', '!', '?')
 END_OF_LIST_ITEM = (';', '.', ':')
 
-def _fix_ocr_typos(text: str) -> str:
-    text = text.replace('|', 'I')
-    return sub(r'Il+(?![A-Za-z])', lambda x: x.group().replace('l', 'I'), text)
+model = SentenceTransformer(
+    model_name_or_path="all-MiniLM-L6-v2",
+    cache_folder=MODEL_CACHE_DIR
+)
 
 
 def _flat_map(inp: list[str], func) -> list[str]:
@@ -16,8 +22,39 @@ def _flat_map(inp: list[str], func) -> list[str]:
     return out
 
 
+def compute_average_similarity(data: list[list[str]]) -> float:
+    similarities = []
+    for row in data:
+        row = [text for text in row if text and text.strip()]  # Filter out empty strings
+        row_len = len(row)
+        if row_len > 1:
+            embeddings = model.encode(row)
+            similarity_matrix = cosine_similarity(embeddings)
+            # Calculate the average similarity of non-diagonal elements
+            avg_similarity = (similarity_matrix.sum() - similarity_matrix.trace()) / (row_len * (row_len - 1))
+            similarities.append(avg_similarity)
+
+    return np.mean(similarities) if similarities else 0
+
+
+# Function to detect table alignment based on similarity
+def detect_table_alignment(data: list[list[str]]):
+    table_rows = data[1:]
+    table_columns = [[data[j][i] for j in range(len(data[1:]))] for i in range(len(data[0]))]
+
+    # Compute average similarity for rows and columns
+    avg_row_similarity = compute_average_similarity(table_rows)
+    avg_column_similarity = compute_average_similarity(table_columns)
+
+    # Determine reading direction
+    alignment = 'horizontal (read table_rows)' if avg_column_similarity > avg_row_similarity else 'vertical (read table_column)'
+
+    return alignment  # , avg_row_similarity, avg_column_similarity
+
+
 def _split_by_empty_lines(text: str) -> list[str]:
     return split(r'\s*\n\s*\n\s*', text)
+
 
 # List items often lack the end-of-sentence character (.;).
 # Add it to make _join_paragraphs work correctly.
@@ -42,6 +79,7 @@ def _split_by_numeration(text: str) -> list[str]:
             par += item_end
         pars.append(par)
     return pars
+
 
 # List items often lack the end-of-sentence character (.;).
 # Add it to make _join_paragraphs work correctly.
@@ -68,6 +106,7 @@ def _split_by_items(text: str) -> list[str]:
         pars.append(par)
     return pars
 
+
 # Short line with a sentence end mark at the end
 # is most likely the last line of a paragraph.
 def _split_by_short_lines(text: str, threshold: float = 0.8) -> list[str]:
@@ -83,6 +122,7 @@ def _split_by_short_lines(text: str, threshold: float = 0.8) -> list[str]:
     if last_par_lines:
         pars.append('\n'.join(last_par_lines))
     return pars
+
 
 # All-caps text lines are section headins
 def _split_by_headings(text: str) -> list[str]:
@@ -114,7 +154,6 @@ def _join_paragraphs(pars: list[str]):
 
 
 def text_to_markdown(text: str) -> str:
-    text = _fix_ocr_typos(text)
     pars = _split_by_empty_lines(text)
     pars = _flat_map(pars, _split_by_short_lines)
     pars = _flat_map(pars, _split_by_headings)
@@ -143,10 +182,10 @@ def _is_table_with_headers(rows: list[list[str]]) -> bool:
     max_lines_in_second_column = max([len(row[1].splitlines()) for row in rows[1:]])
     return max_lines_in_first_column <= 1 or max_lines_in_second_column <= 1
 
+
 def _table_cell_to_markdown(text: str) -> str:
     if not text.strip():
         return ''
-    text = _fix_ocr_typos(text)
     pars = _split_by_empty_lines(text)
     pars = _flat_map(pars, _split_by_short_lines)
     pars = _flat_map(pars, _split_by_items)
