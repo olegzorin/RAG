@@ -8,7 +8,7 @@ from typing import Union
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from conf import DOCS_CACHE_DIR
-from text_utils import text_to_markdown, table_to_markdown
+from text_utils import text_to_markdown, table_to_text
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,14 @@ class PdfPage(BaseModel):
 
     def get_content_len(self) -> int:
         return sum([blk.get_content_len() for blk in self.contents])
+
+    def last_table_index(self) -> int | None:
+        idx = None
+        for i, c in enumerate(self.contents):
+            if c.cols > 1:
+                idx = i
+        return idx
+
 
     def load_from_image(self, path: str) -> None:
 
@@ -129,18 +137,16 @@ class PdfDoc(BaseModel):
     def get_content_len(self) -> int:
         return sum([page.get_content_len() for page in self.pages])
 
-    def get_content(self, show_page_numbers: bool = False) -> str:
+    def get_content(self) -> str:
         content = ''
         plain_text = ''
         for i, page in enumerate(self.pages, 1):
-            if show_page_numbers:
-                content += '\n\n<--------- ' + str(i) + ' ---------->\n\n'
             for text_block in page.contents:
                 if text_block.cols > 1:
                     if plain_text:
                         content += '\n\n' + text_to_markdown(plain_text)
                         plain_text = ''
-                    content += '\n\n' + table_to_markdown(text_block.data)
+                    content += '\n\n' + table_to_text(text_block.data)
                 else:
                     plain_text += text_block.data[0][0]
         if plain_text:
@@ -156,35 +162,27 @@ class PdfDoc(BaseModel):
             last_page: int | None = None
     ) -> None:
 
-        temp_folder = Path(DOCS_CACHE_DIR, 'temp')
-        os.makedirs(temp_folder, exist_ok=True)
-
         doc_name = Path(source_path).stem
 
-        import pdf2image
+        from ocr_utils import convert_pdf_to_images
 
-        img_paths = pdf2image.convert_from_path(
+        img_paths: list[str] = convert_pdf_to_images(
             pdf_path=source_path,
+            doc_name=doc_name,
             first_page=first_page,
-            last_page=last_page,
-            output_folder=temp_folder,
-            output_file=doc_name,
-            fmt='png',
-            paths_only=True,
-            dpi=DPI,
-            grayscale=True
+            last_page=last_page
         )
         try:
             for i, path in enumerate(img_paths, 1):
                 logger.info(f"{doc_name}: read page {i}")
                 page = PdfPage(page_no=i)
-                page.load_from_image(f'{path}')
+                page.load_from_image(path)
                 self.pages.append(page)
         finally:
             if not SAVE_TEMP_FILES:
                 for path in img_paths:
-                    delete_temp_file(f'{path}')
-                    delete_temp_file(Path(f'{path}').with_suffix('.pdf'))
+                    delete_temp_file(path)
+                    delete_temp_file(Path(path).with_suffix('.pdf'))
 
 
 class PdfFile(PdfDoc):

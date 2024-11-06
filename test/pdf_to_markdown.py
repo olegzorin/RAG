@@ -6,7 +6,7 @@ from pathlib import Path
 from conf import DOCS_CACHE_DIR
 from pdf_document import PdfDoc, PdfFile
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARN)
 
 DOCS_DIR = '../docs'
 

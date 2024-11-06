@@ -1,5 +1,7 @@
 import logging
+import os
 import re
+import pdf2image
 from pathlib import Path
 from pydantic import BaseModel
 import camelot as cm
@@ -8,7 +10,7 @@ import pytesseract as pt
 from PIL import Image
 import PyPDF2
 
-from conf import get_tesseract_version
+from conf import get_tesseract_version, DOCS_CACHE_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,32 @@ logger = logging.getLogger(__name__)
 # Note that you should use '--psm' or '-psm' depending on your tesseract version
 TESSERACT_CONFIG = '' if not (v := get_tesseract_version()) else '-psm 6' if (v[0] < 4 and v[1] < 5) else '--psm 6'
 print('TESSERACT_CONFIG=', TESSERACT_CONFIG)
+
+DPI = 150
+
+
+def convert_pdf_to_images(
+        pdf_path: str,
+        doc_name: str,
+        *,
+        first_page: int | None = None,
+        last_page: int | None = None
+) -> list[str]:
+    temp_folder = Path(DOCS_CACHE_DIR, 'temp')
+    os.makedirs(temp_folder, exist_ok=True)
+
+    imgs = pdf2image.convert_from_path(
+        pdf_path=pdf_path,
+        first_page=first_page,
+        last_page=last_page,
+        output_folder=temp_folder,
+        output_file=doc_name,
+        fmt='png',
+        paths_only=True,
+        dpi=DPI,
+        grayscale=True
+    )
+    return [f'{img}' for img in imgs]
 
 
 class TableFrame(BaseModel):
@@ -39,7 +67,7 @@ def extract_tables_from_image(
         pages='1',
         suppress_stdout=True,
         # backend='ghostscript',
-        resolution=150,
+        resolution=DPI,
         flavor='lattice',
         line_scale=40,
     )

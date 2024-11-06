@@ -22,7 +22,7 @@ def _flat_map(inp: list[str], func) -> list[str]:
     return out
 
 
-def compute_average_similarity(data: list[list[str]]) -> float:
+def _compute_average_similarity(data: list[list[str]]) -> float:
     similarities = []
     for row in data:
         row = [text for text in row if text and text.strip()]  # Filter out empty strings
@@ -38,16 +38,16 @@ def compute_average_similarity(data: list[list[str]]) -> float:
 
 
 # Function to detect table alignment based on similarity
-def detect_table_alignment(data: list[list[str]]):
+def _detect_table_alignment(data: list[list[str]]):
     table_rows = data[1:]
     table_columns = [[data[j][i] for j in range(len(data[1:]))] for i in range(len(data[0]))]
 
     # Compute average similarity for rows and columns
-    avg_row_similarity = compute_average_similarity(table_rows)
-    avg_column_similarity = compute_average_similarity(table_columns)
+    avg_row_similarity = _compute_average_similarity(table_rows)
+    avg_column_similarity = _compute_average_similarity(table_columns)
 
     # Determine reading direction
-    alignment = 'horizontal (read table_rows)' if avg_column_similarity > avg_row_similarity else 'vertical (read table_column)'
+    alignment = 'h' if avg_column_similarity > avg_row_similarity else 'v'
 
     return alignment  # , avg_row_similarity, avg_column_similarity
 
@@ -235,3 +235,48 @@ def split_text(text: str, chunker, max_chunk_size: int = 0):
         print('count: ', len(chunks), ', large: ', large_count)
 
     return chunks
+
+
+def _clean_table_cells(rows: list[list[str]]):
+    for i in range(len(rows)):
+        for j in range(len(rows[i])):
+            rows[i][j] = rows[i][j].strip('.\n\r\t: ').replace('\n', ' ')
+
+
+def table_to_text(rows: list[list[str]]):
+    has_headers = _is_table_with_headers(rows)
+    # don't clean table cells before checking for headers!
+    _clean_table_cells(rows)
+    text = ''
+    if has_headers:
+        headers = rows[0]
+        key_col_index = 0
+        val_cols_start = 1
+        if headers[0] == '#':
+            key_col_index = 1
+            val_cols_start = 2
+        for row in rows[1:]:
+            row_key = row[key_col_index]
+            for i, row_val in enumerate(row[val_cols_start:], val_cols_start):
+                if row_val:
+                    text += 'If ' + headers[key_col_index] + ' is ' + row_key + ' then ' + headers[i] + ' is ' + row_val + '.\n\n'
+    elif 'h' == _detect_table_alignment(rows):
+        # read by rows
+        for row in rows:
+            text += '; '.join(row) + '.\n\n'
+    else:
+        # vertical (read by columns)
+        for j in range(len(rows[0])):
+            for i in range(len(rows)):
+                if rows[i][j]:
+                    text += rows[i][j] + '.\n\n'
+    return text
+
+#
+# data= [
+#     ["Therapy Service\n", "Rev Code\n", "Maximum Allowable\n"],
+#     ["Physical Therapy\n", "0420-0423, 0424, 0429\n", "$85.00 per visit\n"],
+#     ["Occupational Therapy\n", "0430-0433, 0434, 0439\n", "$85.00 per visit\n"],
+#     ["Speech Therapy\n", "0440-0443, 0444, 0449\n", "$85.00 per visit\n"]
+# ]
+# print(table_to_text(data))
