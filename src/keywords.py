@@ -10,7 +10,7 @@ from langchain_core.documents import Document
 
 from core import RagSearch, SemanticSplitter
 from db import Neo4jDB
-from reader import PdfDoc
+from pdf_document import PdfDoc
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -42,7 +42,7 @@ class KeywordSearch(RagSearch):
             chunk_size=500
         )
 
-        chunks = document.split_into_chucks([chunker])
+        chunks = chunker.split_text(document.get_content())
 
         # initialize the bm25 retriever and faiss retriever
         bm25_retriever = BM25Retriever.from_texts(
@@ -88,7 +88,7 @@ class KeywordSearch(RagSearch):
 
             # print("retrieved_docs=",retrieved_docs)
 
-            retrieved_texts.extend(document.get_table_rows())
+            # retrieved_texts.extend(document.get_table_rows())
 
             # Initialize vector store and document store
             vectorstore = Neo4jDB(

@@ -8,7 +8,7 @@ import camelot as cm
 from camelot.core import TableList, Table
 import pytesseract as pt
 from PIL import Image
-import PyPDF2
+import pypdf
 
 from conf import get_tesseract_version, DOCS_CACHE_DIR
 
@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # https://pyimagesearch.com/2021/11/15/tesseract-page-segmentation-modes-psms-explained-how-to-improve-your-ocr-accuracy
 # Note that you should use '--psm' or '-psm' depending on your tesseract version
 TESSERACT_CONFIG = '' if not (v := get_tesseract_version()) else '-psm 6' if (v[0] < 4 and v[1] < 5) else '--psm 6'
+TESSERACT_CONFIG += ' -c preserve_interword_spaces=1'
 print('TESSERACT_CONFIG=', TESSERACT_CONFIG)
 
 DPI = 150
@@ -75,7 +76,7 @@ def extract_tables_from_image(
         return []
 
     # Convertion of PDF coordinate system to pixels
-    pdf = PyPDF2.PdfReader(pdf_path)
+    pdf = pypdf.PdfReader(pdf_path)
     mediabox = pdf.pages[0].mediabox
     h_scale = img.width / float(mediabox.width)
     v_scale = img.height / float(mediabox.height)

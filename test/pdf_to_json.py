@@ -11,9 +11,9 @@ logging.basicConfig(level=logging.INFO)
 DOCS_DIR = '../docs'
 
 doc_names = [
-    'MHR',
-    'CCR',
-    'LHS'
+    # 'MHR',
+    'CCR'
+    # 'LHS'
 ]
 
 for document_id, doc_name in enumerate(doc_names, 1):

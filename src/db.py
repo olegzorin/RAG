@@ -8,6 +8,7 @@ from conf import get_property
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.WARNING)
 
+
 # import chromadb.config
 
 # class VectorDB(VectorStore, ABC):
@@ -35,7 +36,6 @@ class Neo4jDB(Neo4jVector):
             self,
             embeddings_model: Embeddings
     ) -> None:
-
         super().__init__(
             url=get_property('neo4j.url'),
             password=get_property('neo4j.password'),
@@ -49,7 +49,6 @@ class Neo4jDB(Neo4jVector):
 
     def close(self):
         self._driver.close()
-
 
 # class ChromaDB(Chroma, VectorDB):
 #

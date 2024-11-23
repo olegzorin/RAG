@@ -75,7 +75,7 @@ class VectorSearch(RagSearch):
                     )
 
             return self._retrieve_answers(
-                retriever=EnsembleRetriever(retrievers=retrievers),
+                retriever=EnsembleRetriever(retrievers=retrievers, weights=None),
                 questions=list(map(lambda s: s.lower(), questions))
             )
         except Exception as e:

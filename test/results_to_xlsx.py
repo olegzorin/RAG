@@ -7,7 +7,7 @@ import xlsxwriter
 from test_utils import questions, test_configs, get_test_results, DOCS_DIR, TestResult, doc_names
 
 workbook = xlsxwriter.Workbook(
-    'RAG Algorithm Test.xlsx',
+    'RAG Algorithm Test Latest.xlsx',
 )
 bold = workbook.add_format({'bold': True})
 center = workbook.add_format({'align': 'center'})

@@ -4,8 +4,8 @@ import shutil
 
 from ragatouille import RAGPretrainedModel
 
-import reader
-from reader import PdfDoc
+from conf import DOCS_CACHE_DIR
+from pdf_document import PdfDoc, PdfFile
 
 os.environ['CC'] = '/usr/bin/gcc'
 os.environ['CXX'] = '/usr/bin/g++'
@@ -13,9 +13,7 @@ os.environ['CXX'] = '/usr/bin/g++'
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
-
 RAG: RAGPretrainedModel = RAGPretrainedModel.from_pretrained("colbert-ir/colbertv2.0")
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,7 +23,7 @@ logging.basicConfig(
 document_id = 1
 document_name = 'CCR'
 
-shutil.copy(f'../docs/{document_name}.json', f'{reader.DOCS_FOLDER}/{document_id}.json')
+shutil.copy(f'../docs/{document_name}.json', f'{DOCS_CACHE_DIR}/{document_id}.json')
 
 questions = {
     'AGR_DATE': "What is the effective date of the agreement?",
@@ -49,7 +47,7 @@ questions = {
     'CLM_ADDRESS': "What is the claims submission address?"
 }
 
-doc: PdfDoc = reader.read_pdf(
+doc: PdfDoc = PdfFile.read_doc(
     document_id=document_id,
     source=f'../docs/{document_name}.pdf'
 )

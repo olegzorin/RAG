@@ -1,18 +1,18 @@
 from re import match, split, search
 
+from conf import MODEL_CACHE_DIR
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from conf import MODEL_CACHE_DIR
+model = SentenceTransformer(
+    model_name_or_path="all-MiniLM-L6-v2",
+    cache_folder=MODEL_CACHE_DIR,
+    local_files_only=True
+)
 
 END_OF_SENTENCE = ('.', ':', '!', '?')
 END_OF_LIST_ITEM = (';', '.', ':')
-
-model = SentenceTransformer(
-    model_name_or_path="all-MiniLM-L6-v2",
-    cache_folder=MODEL_CACHE_DIR
-)
 
 
 def _flat_map(inp: list[str], func) -> list[str]:
@@ -259,7 +259,8 @@ def table_to_text(rows: list[list[str]]):
             row_key = row[key_col_index]
             for i, row_val in enumerate(row[val_cols_start:], val_cols_start):
                 if row_val:
-                    text += 'If ' + headers[key_col_index] + ' is ' + row_key + ' then ' + headers[i] + ' is ' + row_val + '.\n\n'
+                    text += 'If ' + headers[key_col_index] + ' is ' + row_key + ' then ' + headers[
+                        i] + ' is ' + row_val + '.\n\n'
     elif 'h' == _detect_table_alignment(rows):
         # read by rows
         for row in rows:

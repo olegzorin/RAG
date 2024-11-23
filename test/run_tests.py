@@ -2,7 +2,7 @@ import logging
 import shutil
 from pathlib import Path
 
-import reader
+from conf import DOCS_CACHE_DIR
 from run_rag import RagResponse, RagRequest, RagExecutor
 from test_utils import test_configs, questions, TestResult, DOCS_DIR, doc_names
 
@@ -23,11 +23,11 @@ for doc_name in doc_names:
     document_id = 1
     shutil.copy(
         src=f'{DOCS_DIR}/{doc_name}.json',
-        dst=f'{reader.DOCS_FOLDER}/{document_id}.json'
+        dst=f'{DOCS_CACHE_DIR}/{document_id}.json'
     )
 
     for conf in test_configs.configs:
-        if conf.id != 'v4':
+        if doc_name == 'CCR' and not conf.id.startswith('k'):
             continue
         for chunk_size in chunk_sizes:
             request = RagRequest(

@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
 
 import torch
-from langchain_community.chat_models import ChatOllama
+from langchain_ollama import ChatOllama
 from langchain_community.embeddings import HuggingFaceBgeEmbeddings
 from langchain_core.embeddings import Embeddings
 from langchain_core.output_parsers import StrOutputParser
@@ -104,7 +104,6 @@ class RagSearch(ABC):
 
         self.llm = ChatOllama(
             base_url=get_property('ollama.url'),
-            streaming=True,
             model=params.get('ollama.model', DEFAULT_GENERATIVE_MODEL),
             temperature=float(params.get('ollama.temperature', 0.0)),
             # Increasing the temperature will make the model answer more creatively. (Default: 0.8)

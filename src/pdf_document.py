@@ -40,7 +40,7 @@ class TextBlock(BaseModel):
 
 class PdfPage(BaseModel):
     page_no: int
-    contents: list[TextBlock] = []
+    contents: list[TextBlock]
 
     def get_content_len(self) -> int:
         return sum([blk.get_content_len() for blk in self.contents])
@@ -51,7 +51,6 @@ class PdfPage(BaseModel):
             if c.cols > 1:
                 idx = i
         return idx
-
 
     def load_from_image(self, path: str) -> None:
 
@@ -132,7 +131,7 @@ class PdfPage(BaseModel):
 
 
 class PdfDoc(BaseModel):
-    pages: list[PdfPage] = []
+    pages: list[PdfPage]
 
     def get_content_len(self) -> int:
         return sum([page.get_content_len() for page in self.pages])
@@ -175,7 +174,7 @@ class PdfDoc(BaseModel):
         try:
             for i, path in enumerate(img_paths, 1):
                 logger.info(f"{doc_name}: read page {i}")
-                page = PdfPage(page_no=i)
+                page = PdfPage(page_no=i, contents=[])
                 page.load_from_image(path)
                 self.pages.append(page)
         finally:
@@ -224,7 +223,7 @@ class PdfFile(PdfDoc):
                 except ValidationError:
                     logger.warning(f"Exception reading cached document ID={document_id}")
 
-            doc = PdfFile(checksum=checksum)
+            doc = PdfFile(checksum=checksum, pages=[])
             doc.load_from_source(
                 source_path=source,
                 first_page=first_page,

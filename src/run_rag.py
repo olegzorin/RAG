@@ -1,4 +1,5 @@
 import time
+from dataclasses import field
 from typing import List, Optional, Dict, Any
 
 from pydantic import BaseModel
@@ -17,7 +18,7 @@ class RagRequest(BaseModel):
     questions: Optional[List[str]] = None
     template: Optional[Any] = None
     examples: Optional[List[Any]] = None
-    params: Optional[Dict] = {}
+    params: Optional[Dict] = field(default_factory={})
 
 
 class RagResponse(Response):
@@ -70,7 +71,7 @@ class RagExecutor(Executor):
             request: RagRequest,
             response: RagResponse
     ) -> None:
-        document: PdfDoc = PdfFile.read_pdf(
+        document: PdfDoc = PdfFile.read_doc(
             document_id=request.documentId,
             source=request.url
         )
